@@ -38,3 +38,16 @@ def test_negative_number():
 def test_rejects_non_numeric():
     with pytest.raises(ValueError):
         parse_number("abc")
+
+
+def test_three_digit_comma_is_thousands():
+    # Locks in the heuristic: 3-digit comma groups always thousands.
+    assert parse_number("12,345") == 12345.0
+
+
+def test_two_digit_comma_is_eu_decimal():
+    assert parse_number("1,23") == 1.23
+
+
+def test_negative_with_thousands_and_decimal():
+    assert parse_number("-1,234.5") == -1234.5

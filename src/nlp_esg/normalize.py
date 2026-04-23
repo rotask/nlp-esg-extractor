@@ -9,7 +9,12 @@ _PLAIN = re.compile(r"^-?\d+(\.\d+)?$")
 
 
 def parse_number(text: str) -> float:
-    """Parse a human-written number. Raises ValueError if unrecognized."""
+    """Parse a human-written number.
+
+    Convention: a comma followed by exactly three digits is always treated
+    as a thousands separator (so '12,345' -> 12345.0, not 12.345).
+    Raises ValueError if unrecognized.
+    """
     s = text.strip()
     if _THOUSANDS_COMMA.match(s):
         return float(s.replace(",", ""))
