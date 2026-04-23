@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nlp-esg"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "pdfplumber>=0.11,<0.12",
+    "sentence-transformers>=2.7,<3",
+    "transformers>=4.40,<5",
+    "torch>=2.2",
+    "anthropic>=0.34,<1",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "python-dotenv>=1",
+    "reportlab>=4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ipykernel", "nbformat"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
