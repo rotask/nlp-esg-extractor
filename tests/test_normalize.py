@@ -51,3 +51,57 @@ def test_two_digit_comma_is_eu_decimal():
 
 def test_negative_with_thousands_and_decimal():
     assert parse_number("-1,234.5") == -1234.5
+
+
+from nlp_esg.normalize import canonicalize_unit, to_canonical_value
+
+
+def test_canonicalize_unit_energy():
+    assert canonicalize_unit("GWh") == "GWh"
+    assert canonicalize_unit("gwh") == "GWh"
+    assert canonicalize_unit("MWh") == "MWh"
+
+
+def test_canonicalize_unit_emissions():
+    assert canonicalize_unit("tCO2e") == "tCO2e"
+    assert canonicalize_unit("t CO2-eq") == "tCO2e"
+    assert canonicalize_unit("tonnes CO2e") == "tCO2e"
+    assert canonicalize_unit("ktCO2e") == "ktCO2e"
+
+
+def test_canonicalize_unit_water():
+    assert canonicalize_unit("m³") == "m3"
+    assert canonicalize_unit("cubic metres") == "m3"
+    assert canonicalize_unit("ML") == "ML"
+    assert canonicalize_unit("megalitres") == "ML"
+
+
+def test_to_canonical_value_energy_gwh_to_mwh():
+    assert to_canonical_value(1.2, "GWh", canonical="MWh") == pytest.approx(1200.0)
+
+
+def test_to_canonical_value_energy_gj_to_mwh():
+    # 1 GJ = 0.27777... MWh
+    assert to_canonical_value(3600, "GJ", canonical="MWh") == pytest.approx(1000.0, rel=1e-3)
+
+
+def test_to_canonical_value_energy_kwh_to_mwh():
+    assert to_canonical_value(1_000_000, "kWh", canonical="MWh") == pytest.approx(1000.0)
+
+
+def test_to_canonical_value_emissions_kt_to_t():
+    assert to_canonical_value(1.5, "ktCO2e", canonical="tCO2e") == pytest.approx(1500.0)
+
+
+def test_to_canonical_value_water_ml_to_m3():
+    # 1 megalitre = 1,000 m³
+    assert to_canonical_value(5, "ML", canonical="m3") == pytest.approx(5000.0)
+
+
+def test_to_canonical_value_same_unit_unchanged():
+    assert to_canonical_value(42.0, "MWh", canonical="MWh") == 42.0
+
+
+def test_to_canonical_value_unknown_unit_raises():
+    with pytest.raises(ValueError):
+        to_canonical_value(1.0, "fathoms", canonical="m3")
