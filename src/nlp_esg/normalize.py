@@ -91,3 +91,50 @@ def to_canonical_value(value: float, unit: str, canonical: str) -> float:
     if factor is None:
         raise ValueError(f"No conversion from {unit_c!r} to {canonical_c!r}")
     return value * factor
+
+
+_MAGNITUDE = {"thousand": 1e3, "million": 1e6, "billion": 1e9}
+_NUMBER_RE = r"[-+]?\d{1,3}(?:[,\s]\d{3})+(?:\.\d+)?|[-+]?\d+(?:[.,]\d+)?|[-+]?\d+"
+
+
+def parse_value(
+    text: str, kpi_unit_family: list[str]
+) -> tuple[float, str] | None:
+    """
+    Find the first (number, unit) pair in `text` whose unit canonicalizes to one
+    of the KPI's allowed units. Returns (value, canonical_unit) or None.
+    Handles magnitude words ("1.2 million m³") by multiplying in.
+    """
+    # Build a sorted list of accepted unit strings (longest first so "ktCO2e" matches before "tCO2e").
+    accepted_canonicals = set()
+    for u in kpi_unit_family:
+        try:
+            accepted_canonicals.add(canonicalize_unit(u))
+        except ValueError:
+            continue
+
+    # Pattern: number (whitespace) (optional magnitude word) (whitespace) unit
+    unit_alt = "|".join(
+        sorted((re.escape(u) for u in _UNIT_ALIASES), key=len, reverse=True)
+    )
+    mag_alt = "|".join(_MAGNITUDE)
+    pattern = re.compile(
+        rf"({_NUMBER_RE})\s*(?:({mag_alt})\s*)?({unit_alt})",
+        re.IGNORECASE,
+    )
+
+    for m in pattern.finditer(text):
+        raw_num, magnitude, raw_unit = m.group(1), m.group(2), m.group(3)
+        try:
+            value = parse_number(raw_num)
+        except ValueError:
+            continue
+        if magnitude:
+            value *= _MAGNITUDE[magnitude.lower()]
+        try:
+            canonical = canonicalize_unit(raw_unit)
+        except ValueError:
+            continue
+        if canonical in accepted_canonicals:
+            return value, canonical
+    return None

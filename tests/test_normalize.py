@@ -1,5 +1,5 @@
 import pytest
-from nlp_esg.normalize import canonicalize_unit, parse_number, to_canonical_value
+from nlp_esg.normalize import canonicalize_unit, parse_number, parse_value, to_canonical_value
 
 
 def test_plain_integer():
@@ -107,3 +107,41 @@ def test_to_canonical_value_unknown_unit_raises():
 def test_to_canonical_value_accepts_alias_canonical_arg():
     # canonical passed as alias form should work the same as canonical form
     assert to_canonical_value(1.0, "GWh", "mwh") == pytest.approx(1000.0)
+
+
+def test_parse_value_simple():
+    assert parse_value("1,234 tCO2e", kpi_unit_family=["tCO2e"]) == (1234.0, "tCO2e")
+
+
+def test_parse_value_with_magnitude_word():
+    # "1.2 million m³" -> (1_200_000, "m3")
+    assert parse_value("1.2 million m³", kpi_unit_family=["m3", "m³"]) == (1_200_000.0, "m3")
+
+
+def test_parse_value_thousand_magnitude():
+    assert parse_value("45 thousand tCO2e", kpi_unit_family=["tCO2e"]) == (45_000.0, "tCO2e")
+
+
+def test_parse_value_billion_magnitude():
+    assert parse_value("2.5 billion kWh", kpi_unit_family=["kWh", "MWh"]) == (2.5e9, "kWh")
+
+
+def test_parse_value_eu_comma_decimal():
+    # "12,5 GWh" -> (12.5, "GWh")
+    assert parse_value("12,5 GWh", kpi_unit_family=["GWh"]) == (12.5, "GWh")
+
+
+def test_parse_value_rejects_unit_outside_family():
+    assert parse_value("1000 USD", kpi_unit_family=["m3", "ML"]) is None
+
+
+def test_parse_value_no_number_returns_none():
+    assert parse_value("no data available", kpi_unit_family=["tCO2e"]) is None
+
+
+def test_parse_value_picks_first_match():
+    # two candidates in one string; the first matching-unit candidate wins
+    assert parse_value(
+        "Scope 1 was 12,345 tCO2e, Scope 2 was 6,789 tCO2e",
+        kpi_unit_family=["tCO2e"],
+    ) == (12345.0, "tCO2e")
