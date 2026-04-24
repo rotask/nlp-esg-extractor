@@ -3,9 +3,17 @@ from pathlib import Path
 import pytest
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
+
+
+@pytest.fixture(autouse=True)
+def _redirect_cache_dir(tmp_path, monkeypatch):
+    """Redirect the ingest cache into pytest's tmp_path so tests never write into the repo."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    monkeypatch.setattr("nlp_esg.ingest.CACHE_DIR", cache)
+    return cache
 
 
 @pytest.fixture
