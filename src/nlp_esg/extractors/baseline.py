@@ -214,7 +214,8 @@ class BaselineExtractor(Extractor):
                 continue
             lo, hi = kpi["plausible_range"]
             if not (lo <= canonical_value <= hi):
-                flags.append("out_of_range")
+                if "out_of_range" not in flags:
+                    flags.append("out_of_range")
                 continue
             year_bonus = 0.1 if str(report["report_year"]) in s["text"] else 0.0
             score = sim + year_bonus
