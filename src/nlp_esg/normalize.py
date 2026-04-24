@@ -94,7 +94,7 @@ def to_canonical_value(value: float, unit: str, canonical: str) -> float:
 
 
 _MAGNITUDE = {"thousand": 1e3, "million": 1e6, "billion": 1e9}
-_NUMBER_RE = r"[-+]?\d{1,3}(?:[,\s]\d{3})+(?:\.\d+)?|[-+]?\d+(?:[.,]\d+)?|[-+]?\d+"
+_NUMBER_RE = r"[-+]?\d{1,3}(?:[,\s]\d{3})+(?:\.\d+)?|[-+]?\d+(?:[.,]\d+)?"
 
 
 def parse_value(
@@ -119,7 +119,7 @@ def parse_value(
     )
     mag_alt = "|".join(_MAGNITUDE)
     pattern = re.compile(
-        rf"({_NUMBER_RE})\s*(?:({mag_alt})\s*)?({unit_alt})",
+        rf"({_NUMBER_RE})\s*(?:({mag_alt})\s*)?({unit_alt})(?![A-Za-z0-9])",
         re.IGNORECASE,
     )
 

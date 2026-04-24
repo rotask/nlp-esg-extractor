@@ -145,3 +145,8 @@ def test_parse_value_picks_first_match():
         "Scope 1 was 12,345 tCO2e, Scope 2 was 6,789 tCO2e",
         kpi_unit_family=["tCO2e"],
     ) == (12345.0, "tCO2e")
+
+
+def test_parse_value_rejects_unit_substring_match():
+    # "5 mlg" must NOT match "5 ml" and be treated as 5 ML water
+    assert parse_value("5 mlg of something", kpi_unit_family=["m3", "ML"]) is None
