@@ -1,5 +1,5 @@
 import pytest
-from nlp_esg.normalize import parse_number
+from nlp_esg.normalize import canonicalize_unit, parse_number, to_canonical_value
 
 
 def test_plain_integer():
@@ -53,9 +53,6 @@ def test_negative_with_thousands_and_decimal():
     assert parse_number("-1,234.5") == -1234.5
 
 
-from nlp_esg.normalize import canonicalize_unit, to_canonical_value
-
-
 def test_canonicalize_unit_energy():
     assert canonicalize_unit("GWh") == "GWh"
     assert canonicalize_unit("gwh") == "GWh"
@@ -105,3 +102,8 @@ def test_to_canonical_value_same_unit_unchanged():
 def test_to_canonical_value_unknown_unit_raises():
     with pytest.raises(ValueError):
         to_canonical_value(1.0, "fathoms", canonical="m3")
+
+
+def test_to_canonical_value_accepts_alias_canonical_arg():
+    # canonical passed as alias form should work the same as canonical form
+    assert to_canonical_value(1.0, "GWh", "mwh") == pytest.approx(1000.0)

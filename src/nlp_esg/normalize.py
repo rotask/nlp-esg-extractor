@@ -40,11 +40,11 @@ _UNIT_ALIASES: dict[str, str] = {
     # water
     "m3": "m3", "m³": "m3", "cubic metres": "m3", "cubic meters": "m3",
     "ml": "ML", "megalitres": "ML", "megaliters": "ML",
-    "kl": "kL", "thousand m3": "kL",  # 1 thousand m3 == 1 kL? No, 1 thousand m3 = 1 ML.
-    # Correction below handles "thousand m3" properly.
+    "kl": "kL", "thousand m3": "kL",  # placeholder - overwritten below to ML (intentional two-step)
 }
 
-# Overwrite the ambiguous entry: "thousand m3" == 1000 m3 == 1 ML (per ESG reporting convention)
+# Per ESG reporting convention, "thousand m3" == 1000 m3 == 1 ML. The two-step
+# assignment (placeholder above, override here) is deliberate per the Task 4 plan.
 _UNIT_ALIASES["thousand m3"] = "ML"
 
 
@@ -81,7 +81,12 @@ _CONVERSIONS: dict[tuple[str, str], float] = {
 def to_canonical_value(value: float, unit: str, canonical: str) -> float:
     """Convert value from `unit` into `canonical`. Raises ValueError on unknown units."""
     unit_c = canonicalize_unit(unit)
-    canonical_c = canonicalize_unit(canonical) if canonical.lower() in _UNIT_ALIASES else canonical
+    try:
+        canonical_c = canonicalize_unit(canonical)
+    except ValueError:
+        canonical_c = canonical
+    if unit_c == canonical_c:
+        return value
     factor = _CONVERSIONS.get((unit_c, canonical_c))
     if factor is None:
         raise ValueError(f"No conversion from {unit_c!r} to {canonical_c!r}")
