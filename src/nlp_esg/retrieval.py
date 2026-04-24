@@ -1,6 +1,18 @@
 from __future__ import annotations
 import numpy as np
 
+import logging
+import re
+from functools import lru_cache
+from typing import TypedDict
+
+from sentence_transformers import SentenceTransformer, models
+
+from nlp_esg.config import EMBEDDING_MODEL_NAME
+from nlp_esg.ingest import ParsedReport
+
+log = logging.getLogger(__name__)
+
 
 def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     a = np.asarray(a, dtype=np.float32).ravel()
@@ -26,3 +38,89 @@ def top_k(query: np.ndarray, corpus: np.ndarray, k: int) -> list[int]:
     # argpartition for speed, then sort the top-k
     part = np.argpartition(-scores, k - 1)[:k]
     return list(part[np.argsort(-scores[part])])
+
+
+_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z(])")
+
+
+class Sentence(TypedDict):
+    page_num: int
+    text: str
+    embedding: np.ndarray
+
+
+class TableHeaderEmb(TypedDict):
+    table_idx: int
+    header_string: str
+    embedding: np.ndarray
+
+
+class IndexedReport(TypedDict):
+    company: str
+    report_year: int
+    pages: list
+    tables: list
+    sentences: list[Sentence]
+    table_headers: list[TableHeaderEmb]
+
+
+@lru_cache(maxsize=1)
+def _load_model(name: str) -> SentenceTransformer:
+    if name == "climatebert":
+        word = models.Transformer("climatebert/distilroberta-base-climate-f")
+        pooling = models.Pooling(
+            word.get_word_embedding_dimension(),
+            pooling_mode_mean_tokens=True,
+        )
+        return SentenceTransformer(modules=[word, pooling])
+    if name == "minilm":
+        return SentenceTransformer("all-MiniLM-L6-v2")
+    raise ValueError(f"Unknown embedding model: {name!r}")
+
+
+def embed_texts(texts: list[str], model_name: str | None = None) -> np.ndarray:
+    model = _load_model(model_name or EMBEDDING_MODEL_NAME)
+    if not texts:
+        return np.zeros((0, model.get_sentence_embedding_dimension()), dtype=np.float32)
+    emb = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+    return emb.astype(np.float32)
+
+
+def split_sentences(text: str) -> list[str]:
+    """Cheap regex sentence splitter. Avoids nltk download step."""
+    parts = _SENT_SPLIT.split(text or "")
+    return [p.strip() for p in parts if p.strip()]
+
+
+def build_index(report: ParsedReport, model_name: str | None = None) -> IndexedReport:
+    sentences: list[Sentence] = []
+    sent_texts: list[str] = []
+    sent_pages: list[int] = []
+    for page in report["pages"]:
+        for s in split_sentences(page["text"]):
+            sent_texts.append(s)
+            sent_pages.append(page["page_num"])
+
+    sent_embs = embed_texts(sent_texts, model_name=model_name)
+    for i, (text, page) in enumerate(zip(sent_texts, sent_pages)):
+        sentences.append({"page_num": page, "text": text, "embedding": sent_embs[i]})
+
+    header_strings: list[str] = []
+    for t in report["tables"]:
+        header_str = " | ".join(h for h in t["headers"] if h)
+        header_strings.append(header_str)
+
+    header_embs = embed_texts(header_strings, model_name=model_name)
+    table_headers: list[TableHeaderEmb] = [
+        {"table_idx": i, "header_string": hs, "embedding": header_embs[i]}
+        for i, hs in enumerate(header_strings)
+    ]
+
+    return {
+        "company": report["company"],
+        "report_year": report["report_year"],
+        "pages": report["pages"],
+        "tables": report["tables"],
+        "sentences": sentences,
+        "table_headers": table_headers,
+    }
