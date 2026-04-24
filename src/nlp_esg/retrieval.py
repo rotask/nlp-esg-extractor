@@ -9,7 +9,7 @@ from typing import TypedDict
 from sentence_transformers import SentenceTransformer, models
 
 from nlp_esg.config import EMBEDDING_MODEL_NAME
-from nlp_esg.ingest import ParsedReport
+from nlp_esg.ingest import ParsedReport, Page, TableEntry
 
 log = logging.getLogger(__name__)
 
@@ -58,13 +58,13 @@ class TableHeaderEmb(TypedDict):
 class IndexedReport(TypedDict):
     company: str
     report_year: int
-    pages: list
-    tables: list
+    pages: list[Page]
+    tables: list[TableEntry]
     sentences: list[Sentence]
     table_headers: list[TableHeaderEmb]
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=2)
 def _load_model(name: str) -> SentenceTransformer:
     if name == "climatebert":
         word = models.Transformer("climatebert/distilroberta-base-climate-f")
@@ -72,8 +72,10 @@ def _load_model(name: str) -> SentenceTransformer:
             word.get_word_embedding_dimension(),
             pooling_mode_mean_tokens=True,
         )
+        log.info("loaded embedding model %r", name)
         return SentenceTransformer(modules=[word, pooling])
     if name == "minilm":
+        log.info("loaded embedding model %r", name)
         return SentenceTransformer("all-MiniLM-L6-v2")
     raise ValueError(f"Unknown embedding model: {name!r}")
 
