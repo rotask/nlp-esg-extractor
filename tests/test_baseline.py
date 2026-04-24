@@ -48,3 +48,42 @@ def test_baseline_rejects_unit_outside_family(fake_embed):
     ext = BaselineExtractor()
     result = ext.extract(indexed, "scope_1_emissions")
     assert result.value is None  # USD is not in the tCO2e family -> no table match
+
+
+def test_baseline_sentence_fallback(fake_embed, report_sentence_only):
+    indexed = build_index(report_sentence_only)
+    ext = BaselineExtractor()
+    result = ext.extract(indexed, "scope_1_emissions")
+    assert result.value == pytest.approx(12345.0)
+    assert result.unit == "tCO2e"
+    assert result.source_page == 7
+    assert "sentence" in (result.source_snippet or "").lower()
+
+
+def test_baseline_not_reported_when_nothing_matches(fake_embed):
+    empty_report = {
+        "company": "foo", "report_year": 2024,
+        "pages": [{"page_num": 1, "text": "Nothing relevant here."}],
+        "tables": [],
+    }
+    indexed = build_index(empty_report)
+    ext = BaselineExtractor()
+    result = ext.extract(indexed, "scope_1_emissions")
+    assert result.value is None
+    assert result.unit is None
+
+
+def test_baseline_rejects_truly_out_of_range(fake_embed):
+    weird = {
+        "company": "acme", "report_year": 2024,
+        "pages": [
+            {"page_num": 1, "text": "Scope 1 direct greenhouse gas emissions were 0.5 tCO2e last year."},
+        ],
+        "tables": [],
+    }
+    indexed = build_index(weird)
+    ext = BaselineExtractor()
+    result = ext.extract(indexed, "scope_1_emissions")
+    # 0.5 is below plausible_range (1e2, 1e9) -> should be rejected
+    assert result.value is None
+    assert "out_of_range" in result.flags

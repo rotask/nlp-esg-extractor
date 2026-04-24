@@ -3,7 +3,8 @@ import logging
 import re
 from typing import Any
 
-from nlp_esg.config import KPIS, TAU_TABLE
+import numpy as np
+from nlp_esg.config import KPIS, TAU_TABLE, TOP_K_SENTENCES
 from nlp_esg.extractors.base import Extractor
 from nlp_esg.normalize import (
     _NUMBER_RE,
@@ -12,7 +13,7 @@ from nlp_esg.normalize import (
     parse_value,
     to_canonical_value,
 )
-from nlp_esg.retrieval import cosine_sim, embed_texts
+from nlp_esg.retrieval import cosine_sim, embed_texts, top_k
 from nlp_esg.types import KPIExtraction
 
 log = logging.getLogger(__name__)
@@ -183,18 +184,62 @@ class BaselineExtractor(Extractor):
                 flags=flags,
             )
 
-        # Table search found nothing usable — return not-reported for now.
-        # (Sentence fallback is added in Task 11.)
+        # --- Sentence fallback ---
+        if not report["sentences"]:
+            return KPIExtraction(
+                company=report["company"], report_year=report["report_year"],
+                kpi=kpi_key, value=None, unit=None, reporting_year=None,
+                source_snippet=None, source_page=None, confidence=None,
+                extractor=self.name, flags=flags,
+            )
+
+        sent_embs = np.stack([s["embedding"] for s in report["sentences"]])
+        top_idxs = top_k(query_emb, sent_embs, k=TOP_K_SENTENCES)
+
+        best: tuple[float, float, str, str, int] | None = None
+        for idx in top_idxs:
+            s = report["sentences"][idx]
+            sim = cosine_sim(query_emb, s["embedding"])
+            pv = parse_value(s["text"], kpi_unit_family=kpi["unit_family"])
+            if pv is None:
+                continue
+            raw_value, unit = pv
+            if unit not in unit_family_canonicals:
+                continue
+            try:
+                canonical_value = to_canonical_value(
+                    raw_value, unit, kpi["canonical_unit"]
+                )
+            except ValueError:
+                continue
+            lo, hi = kpi["plausible_range"]
+            if not (lo <= canonical_value <= hi):
+                flags.append("out_of_range")
+                continue
+            year_bonus = 0.1 if str(report["report_year"]) in s["text"] else 0.0
+            score = sim + year_bonus
+            if best is None or score > best[0]:
+                best = (score, canonical_value, s["text"], unit, s["page_num"])
+
+        if best is None:
+            return KPIExtraction(
+                company=report["company"], report_year=report["report_year"],
+                kpi=kpi_key, value=None, unit=None, reporting_year=None,
+                source_snippet=None, source_page=None, confidence=None,
+                extractor=self.name, flags=flags,
+            )
+
+        score, canonical_value, sentence, unit, page = best
         return KPIExtraction(
             company=report["company"],
             report_year=report["report_year"],
             kpi=kpi_key,
-            value=None,
-            unit=None,
-            reporting_year=None,
-            source_snippet=None,
-            source_page=None,
-            confidence=None,
+            value=canonical_value,
+            unit=kpi["canonical_unit"],
+            reporting_year=report["report_year"],
+            source_snippet=f"sentence@page {page}: {sentence}",
+            source_page=page,
+            confidence=float(score),
             extractor=self.name,
             flags=flags,
         )
