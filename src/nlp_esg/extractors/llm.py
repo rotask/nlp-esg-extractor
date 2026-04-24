@@ -100,14 +100,18 @@ class LLMExtractor(Extractor):
             f"{self.model}|{kpi_key}|{user_prompt}".encode()
         ).hexdigest()
         cache_path = CACHE_DIR / "llm" / f"{cache_key}.json"
+        tool_input: dict | None = None
         if cache_path.exists():
-            with cache_path.open() as f:
-                tool_input = json.load(f)
-        else:
+            try:
+                with cache_path.open(encoding="utf-8") as f:
+                    tool_input = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                log.warning("corrupt llm cache at %s (%s); refetching", cache_path, e)
+        if tool_input is None:
             tool_input = self._call_with_retry(user_prompt, kpi_key)
             if tool_input is not None:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
-                with cache_path.open("w") as f:
+                with cache_path.open("w", encoding="utf-8") as f:
                     json.dump(tool_input, f)
 
         if tool_input is None:
@@ -127,15 +131,8 @@ class LLMExtractor(Extractor):
                 report, kpi_key, flags=[*flags, "llm_missing_unit"]
             )
 
-        # Canonicalize & validate
         try:
-            canonical_unit = canonicalize_unit(unit)
-        except ValueError:
-            return self._not_reported(
-                report, kpi_key, flags=[*flags, "unit_unknown"]
-            )
-
-        try:
+            canonicalize_unit(unit)
             canonical_value = to_canonical_value(value, unit, kpi["canonical_unit"])
         except ValueError:
             return self._not_reported(

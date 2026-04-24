@@ -11,12 +11,6 @@ class _FakeToolUse:
         self.input = input_
 
 
-class _FakeText:
-    def __init__(self, text: str):
-        self.type = "text"
-        self.text = text
-
-
 class _FakeResponse:
     def __init__(self, content):
         self.content = content
