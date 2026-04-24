@@ -38,6 +38,7 @@ def _redirect_cache_dir(tmp_path, monkeypatch):
     cache = tmp_path / "cache"
     cache.mkdir()
     monkeypatch.setattr("nlp_esg.ingest.CACHE_DIR", cache)
+    monkeypatch.setattr("nlp_esg.extractors.llm.CACHE_DIR", cache, raising=False)
     return cache
 
 
