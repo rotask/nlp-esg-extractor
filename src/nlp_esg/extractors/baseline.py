@@ -6,6 +6,7 @@ from typing import Any
 from nlp_esg.config import KPIS, TAU_TABLE
 from nlp_esg.extractors.base import Extractor
 from nlp_esg.normalize import (
+    _NUMBER_RE,
     canonicalize_unit,
     parse_number,
     parse_value,
@@ -132,10 +133,7 @@ class BaselineExtractor(Extractor):
                 continue
             cell = row[year_col]
             # Extract the number (strip any unit embedded in the cell)
-            num_match = re.search(
-                r"[-+]?\d{1,3}(?:[,\s]\d{3})+(?:\.\d+)?|[-+]?\d+(?:[.,]\d+)?",
-                cell,
-            )
+            num_match = re.search(_NUMBER_RE, cell)
             if not num_match:
                 continue
             try:
@@ -161,14 +159,14 @@ class BaselineExtractor(Extractor):
             lo, hi = kpi["plausible_range"]
             if not (lo <= canonical_value <= hi):
                 flags.append("out_of_range")
+                log.debug("baseline: table candidate rejected out_of_range (kpi=%s, value=%s)", kpi_key, canonical_value)
                 continue
 
             # Guard: a raw cell that is literally a 4-digit year is suspicious
             # even when it nominally lies in the plausible range. Flag it so
             # downstream review can distinguish "we extracted a value" from
             # "we extracted the year-column header copied into the cell".
-            cell_stripped = cell.strip()
-            if _YEAR_RE.fullmatch(cell_stripped) and raw_value == canonical_value:
+            if _YEAR_RE.fullmatch(cell.strip()):
                 flags.append("year_shaped_value")
 
             return KPIExtraction(

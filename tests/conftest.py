@@ -133,7 +133,8 @@ def fake_embed(monkeypatch):
     # is bound at test-module import; also patch it in the test module.
     import sys as _sys
     for mod_name in list(_sys.modules):
-        if mod_name.endswith(".test_baseline") or mod_name == "test_baseline":
+        short = mod_name.rsplit(".", 1)[-1]
+        if short.startswith("test_baseline"):
             monkeypatch.setattr(
                 f"{mod_name}.build_index", _build_index_with_row_labels, raising=False
             )
