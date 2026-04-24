@@ -10,6 +10,7 @@ def is_correct(pred: KPIExtraction, gold: dict[str, Any]) -> bool:
     g_value = gold.get("value")
 
     if p_value is None and g_value is None:
+        # Both "not reported" — unit/year are irrelevant in this branch.
         return True
     if p_value is None or g_value is None:
         return False
@@ -36,7 +37,10 @@ def evaluate(
     - Precision: TP / (TP + FP). FP = pred has a value but is incorrect (wrong number,
       wrong unit, wrong year, or hallucinated when gold is 'not reported').
     - Recall: TP / (TP + FN). FN = gold has a value but pred is wrong or 'not reported'.
-    - Coverage: fraction of preds with non-null value.
+    - Coverage: fraction of matched (pred, gold) pairs where the pred has a
+      non-null value. When preds and golds are generated as parallel rows
+      per company-year (the coursework case) this equals
+      non_null_preds / len(preds).
     """
     pred_by_key = {(p.company, p.report_year): p for p in preds}
     tp = fp = fn = tn = 0
