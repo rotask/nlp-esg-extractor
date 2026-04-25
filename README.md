@@ -14,13 +14,22 @@ an Anthropic Claude structured-output extractor.
 ## Run
 
 ```bash
+# Parse PDFs, extract, compare, evaluate — prints tables to stdout.
 python -m nlp_esg.pipeline
 ```
 
-Open `notebooks/demo.ipynb` to see the comparison table and eval metrics.
+## Demo notebook
+
+```bash
+jupyter notebook notebooks/demo.ipynb
+```
+
+Runs the same pipeline interactively and includes the MiniLM vs. ClimateBERT
+comparison and qualitative-examples cells.
 
 ## Test
 
 ```bash
-pytest
+pytest              # unit tests only
+RUN_INTEGRATION=1 pytest   # also runs LLM + real-PDF integration tests
 ```
