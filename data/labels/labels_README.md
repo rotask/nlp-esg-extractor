@@ -10,7 +10,7 @@ extractor predictions against these labels.
 | ---------------- | -------- | ----- |
 | `company`        | string   | Must match the filename prefix in `data/reports/`. |
 | `report_year`    | int      | Must match the year in the PDF filename. |
-| `kpi`            | string   | One of: `scope_1_emissions`, `renewable_energy`, `water_consumption`. |
+| `kpi`            | string   | One of: `scope_1_emissions`, `total_energy_consumption`, `water_consumption`. |
 | `value`          | float    | The reported value **in the canonical unit** (tCO2e, MWh, m³). Blank = not reported. |
 | `unit`           | string   | Canonical unit (`tCO2e`, `MWh`, `m3`) or blank. |
 | `reporting_year` | int      | Year the value itself refers to (usually same as `report_year`). Blank if not reported. |
@@ -41,5 +41,5 @@ If the value falls outside these plausibility ranges, double-check the unit:
 | KPI                         | Plausible range (canonical) |
 | --------------------------- | --------------------------- |
 | Scope 1 emissions (tCO2e)   | 100 – 10⁹                   |
-| Renewable energy (MWh)      | 100 – 10⁹                   |
+| Total energy consumption (MWh) | 100 – 10⁹                |
 | Water consumption (m³)      | 10 – 10¹⁰                   |

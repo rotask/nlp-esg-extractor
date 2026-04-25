@@ -22,6 +22,6 @@ def test_real_pdf_pipeline_runs_end_to_end():
     indexed = build_index(parsed)
     ext = BaselineExtractor()
     # Just check extraction runs without exception for all 3 KPIs.
-    for kpi in ("scope_1_emissions", "renewable_energy", "water_consumption"):
+    for kpi in ("scope_1_emissions", "total_energy_consumption", "water_consumption"):
         result = ext.extract(indexed, kpi)
         assert result.extractor == "baseline"

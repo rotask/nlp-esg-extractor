@@ -27,5 +27,5 @@ def test_run_extraction_produces_rows_per_report_and_kpi(
     assert len(extractions) == 12
     assert {e.extractor for e in extractions} == {"baseline", "llm"}
     assert {e.kpi for e in extractions} == {
-        "scope_1_emissions", "renewable_energy", "water_consumption",
+        "scope_1_emissions", "total_energy_consumption", "water_consumption",
     }

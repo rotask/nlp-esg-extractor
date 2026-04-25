@@ -3,7 +3,7 @@ from nlp_esg.types import KPIExtraction
 
 
 def test_kpi_registry_has_three_keys():
-    assert set(KPI_KEYS) == {"scope_1_emissions", "renewable_energy", "water_consumption"}
+    assert set(KPI_KEYS) == {"scope_1_emissions", "total_energy_consumption", "water_consumption"}
 
 
 def test_each_kpi_has_required_fields():

@@ -46,4 +46,4 @@ def test_only_selected_extractor_used():
 def test_all_kpi_columns_present():
     extractions = [_e("acme", 2024, "scope_1_emissions", 100)]
     df = build_comparison_table(extractions, extractor="baseline")
-    assert set(df.columns) >= {"scope_1_emissions", "renewable_energy", "water_consumption"}
+    assert set(df.columns) >= {"scope_1_emissions", "total_energy_consumption", "water_consumption"}

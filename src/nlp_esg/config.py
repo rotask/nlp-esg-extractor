@@ -22,8 +22,8 @@ KPIS: dict[str, dict] = {
         "canonical_unit": "tCO2e",
         "plausible_range": (1e2, 1e9),
     },
-    "renewable_energy": {
-        "query": "Total energy consumption from renewable sources",
+    "total_energy_consumption": {
+        "query": "Total energy consumption",
         "unit_family": ["MWh", "GWh", "TWh", "GJ", "TJ", "PJ", "kWh"],
         "canonical_unit": "MWh",
         "plausible_range": (1e2, 1e9),
