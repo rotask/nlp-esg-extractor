@@ -1,0 +1,2 @@
+company,report_year,kpi,value,unit,reporting_year,source_page,notes
+acme,2024,scope_1_emissions,45678,tCO2e,2024,12,"Example row — delete once real labels are filled in"
