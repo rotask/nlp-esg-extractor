@@ -888,3 +888,250 @@ The remaining 3 cells are documented as architecturally
 unsolvable for a regex+retrieval pipeline, and their solutions sit
 behind the LLM half (cache-key fix in place, awaits credit
 restoration).
+
+---
+
+## 7. Embedding-model comparison (ClimateBERT vs MiniLM)
+
+Both v9 runs used identical extractor code; the only variable was
+the sentence-embedding model. Indexed caches written to
+`data/cache/{company}_{year}_{parser}_indexed_{model}.pkl` make
+both reproducible without re-embedding.
+
+### 7.1 Headline metrics
+
+| Run | Model | Baseline TP | Macro F1 |
+| --- | --- | --- | --- |
+| v9 / `v9_magnitude_tiebreak` | ClimateBERT (`distilroberta-base-climate-f`, 82M params) | **12/15** | **0.88** |
+| v9 / `v9_minilm` | MiniLM (`all-MiniLM-L6-v2`, 22M params) | 11/15 | 0.84 |
+
+Single per-cell delta:
+
+| Cell | ClimateBERT | MiniLM | Why |
+| --- | --- | --- | --- |
+| BP `total_energy_consumption` | ✅ 134,448,000 (table path) | ❌ MISS | See §7.3 |
+
+### 7.2 Where each model ranks the gold page (v9 hybrid score)
+
+For most cells MiniLM actually ranks the gold page as well as or
+*better* than ClimateBERT — a counter-intuitive result that the
+table-path-vs-line-scanner asymmetry explains in §7.3.
+
+| Company | KPI | Gold pg | ClimateBERT rank | MiniLM rank |
+| --- | --- | --- | --- | --- |
+| BP | scope_1 | 6 | #2 (s=0.823) | #3 (s=0.765) |
+| BP | total_energy | 6 | #1 (s=0.954) | #1 (s=1.000) |
+| BP | water | 9 | #1 (s=0.646) | #1 (s=0.952) |
+| Enel | scope_1 | 147 | #24 (s=0.540) | **#2 (s=0.958)** |
+| Enel | total_energy | 150 | #14 (s=0.518) | **#1 (s=1.000)** |
+| Enel | water | 286 | #2 (s=0.802) | #1 (s=0.994) |
+| Eni | scope_1 | 166 | #5 (s=0.910) | #2 (s=0.930) |
+| Eni | total_energy | 170 | #1 (s=0.994) | #1 (s=1.000) |
+| Eni | water | 184 | #1 (s=0.819) | #1 (s=0.997) |
+| Iberdrola | scope_1 | 48 | #1 (s=1.000) | #1 (s=1.000) |
+| Iberdrola | total_energy | 46 | #2 (s=0.818) | #2 (s=0.907) |
+| Iberdrola | water | 58 | #1 (s=0.922) | #1 (s=1.000) |
+| Shell | scope_1 | 367 | #15 (s=0.721) | #17 (s=0.682) |
+| Shell | total_energy | 368 | #1 (s=0.862) | #1 (s=1.000) |
+| Shell | water | 383 | #3 (s=0.843) | #4 (s=0.948) |
+
+### 7.3 Why ClimateBERT wins despite worse page rankings
+
+The single behavioural difference is **the table-first path**.
+`extractors/baseline.py` only invokes the table path when at least
+one table-header embedding has cosine similarity ≥ `TAU_TABLE = 0.55`
+to the KPI query. For the BP total_energy table on page 6 with the
+header `... | 2021 | ... | 2025 | Energy - Operational control
+boundary h,i,j | Energy consumption t l | ...`:
+
+| Model | Header cosine to "Total energy consumption MWh" | TAU_TABLE = 0.55 | Path that fired |
+| --- | --- | --- | --- |
+| ClimateBERT | **0.929** | passes ✓ | table-first → 134,448,000 ✅ |
+| MiniLM | **0.383** | below ✗ | falls through to line scanner; no usable line found → MISS |
+
+For MiniLM **every BP table header scores below 0.55** — the
+table-first path is entirely dormant for that report. ClimateBERT,
+trained on a climate-domain corpus (Webersinke et al. 2021),
+recognises the terminology `"Operational control boundary"` +
+`"Energy consumption"` + `"GWh"` as semantically aligned with
+`"Total energy consumption MWh"` even though the words don't
+overlap. MiniLM treats them as nearly unrelated.
+
+### 7.4 Takeaway
+
+For broad page-level retrieval (the line-scanner path), MiniLM is
+fully sufficient and even slightly more decisive (higher per-page
+scores). For table-header recognition where domain-specific
+terminology dominates and few overlapping tokens exist between
+header and query, **a domain-trained embedding model is the
+load-bearing component**. On this corpus the gain is one cell
+(BP total_energy 134,448 MWh) — but the cell is structurally
+impossible to recover via the line scanner because the gold value
+sits in a flattened table row whose label-side tokens
+(`"Operational control boundary"`) don't carry KPI-keyword density.
+
+ClimateBERT's index also runs ~2× slower to build than MiniLM's
+(~10 min vs ~4 min for the 5-report corpus on CPU); the indexed
+cache amortises this across runs.
+
+---
+
+## 8. Pipeline walkthrough — concrete examples
+
+For each pipeline stage, a real artefact from a v9 run on BP.
+
+### 8.1 Ingest (`parse_pdf` → `ParsedReport`)
+
+`parse_pdf` tries Docling first (skipped on this machine via
+`NLP_ESG_DISABLE_DOCLING=1`, except for BP whose 135 KB report
+was small enough to succeed before the env var was introduced).
+Falls back to pdfplumber. Output is a `ParsedReport` TypedDict:
+
+```python
+{'company': 'bp', 'report_year': 2024, 'parser': 'docling',
+ '#pages': 14, '#tables': 18}
+
+# Page 6 text[:200]:
+'Net zero Greenhouse gas emissions and energy\n\n
+| Metric | Unit | 2021 | 2022 | 2023 | 2024 | 2025 |\n|...'
+```
+
+Each page is `{page_num, text}`; each table is
+`{page_num, headers, rows}` with cells already trimmed.
+
+### 8.2 Normalise CO₂ (`normalize.normalize_co2`)
+
+Fixes the four PDF-rendering artefacts where `CO₂` gets split.
+Example covering the iteration-2 Enel scope_1 case:
+
+```
+BEFORE: 'Total gross Scope 1 GHG emissions(1) MtCO\n2eq 18.95 20.20 (1.25) -6.2%'
+AFTER:  'Total gross Scope 1 GHG emissions(1) MtCO2eq 18.95 20.20 (1.25) -6.2%'
+```
+
+Iteration 4 added the non-letter lookbehind that prevents the
+regex from matching `co` inside `Scope` and corrupting the line.
+
+### 8.3 Build index (`retrieval.build_index` → `IndexedReport`)
+
+Adds per-sentence and per-table-header embeddings to the
+`ParsedReport`. For BP (14 pages), produces 69 sentence embeddings
+and 18 table-header embeddings.
+
+```python
+# One sentence dict:
+{'page_num': 3,
+ 'text': 'Scope 1 (direct) GHG emissions (operational control boundary) (MtCO2e)\n5.',
+ 'embedding': array([-0.025, 0.050, 0.011, -0.099, -0.037, -0.023, ...], shape=(768,))}
+
+# One table-header embedding:
+{'table_idx': 2,
+ 'header_string': 'Metric | Unit | 2019 baseline | 2021 | 2022 | 2023 | 2024 | 2025 | Aggregate lifecycle ...',
+ 'embedding': array(...)}
+```
+
+ClimateBERT produces 768-dim vectors, MiniLM produces 384-dim. The
+indexed pkl is cached to disk; subsequent runs skip the
+embedding pass entirely.
+
+### 8.4 Retrieve top pages (`retrieval.rank_pages_hybrid`)
+
+Multi-query reciprocal-rank fusion across the per-KPI `queries`
+list, combined with BM25 over normalised page text, both min-max
+normalised in [0, 1] and weighted α=0.5. For BP scope_1:
+
+```
+Queries: ['Total gross Scope 1 GHG emissions',
+          'Scope 1 direct greenhouse gas emissions tCO2e',
+          'Scope 1 (direct) emissions']
+Top 5 pages by hybrid score:
+  #1  page=  3  score=0.8653
+  #2  page=  6  score=0.8234
+  #3  page=  5  score=0.6880
+  #4  page=  4  score=0.6423
+  #5  page=  2  score=0.5043
+```
+
+`top_n_pages = 25`; widening from 8 in iteration 4 was the fix
+that let Enel scope_1 (gold rank #24) reach the line scanner.
+
+### 8.5 Baseline extractor — table-first path
+
+`BaselineExtractor.extract` first scans table headers with cosine
+similarity ≥ `TAU_TABLE = 0.55`, picks the one matching the KPI's
+query best, then identifies the year-column and the row whose
+label tokens overlap the query. BP `total_energy_consumption`:
+
+```
+KPIExtraction(
+  value=134448000.0, unit='MWh', reporting_year=2024,
+  source_page=6,
+  source_snippet='table@page 6: Energy consumption l z | 134,448',
+  confidence=...,
+  extractor='baseline', flags=[])
+```
+
+The `134,448` is the year-2025 column on the row labelled
+`Energy consumption t l` in the BP datasheet. Final canonical
+value = 134,448 GWh × 1000 = 134,448,000 MWh.
+
+### 8.6 Baseline extractor — line-scanner fallback
+
+When the table path produces nothing, the line scanner takes over.
+For BP `water_consumption` it picks the `Freshwater consumption`
+row whose unit token is `millionm 3` (a PDF rendering of
+`million m³`). The line has 5 yearly columns; the year-row two
+sub-tables above provides the column index for the most-recent
+year (2025), so the picked value is the 5th column, 47.3, ratio-
+scaled with the magnitude:
+
+```
+KPIExtraction(
+  value=47299999.99...,  # = 47.3 × 1e6
+  unit='m3',
+  source_page=9,
+  source_snippet='line@page 9: | Freshwater consumption | millionm 3 | 53.6 | 51.7 | 47.4 | 46.5 | 47.3 |')
+```
+
+### 8.7 LLM extractor — context construction
+
+`LLMExtractor._build_context` uses the same `rank_pages_hybrid`
+to pick the top 12 pages, concatenates the normalised page text
+(capped to 4 000 chars per page) plus any tables on those pages,
+and labels each with `=== Page N ===`. For BP scope_1:
+
+```
+Total context length: 59,577 chars
+First chars:
+=== Page 3 ===
+Introduction Metrics subject to assurance for 2025
+
+Net zero
+
+## Metrics subject to assurance for 2025
+
+The selected sustainability information below was subject to limited
+assurance by Deloitte LLP in accordance with the International Standard
+for Assurance Engagements (ISAE) 3000 (Revised). ...
+```
+
+The context goes into a Claude messages call with strict tool-use
+schema (`tool_choice={"type":"tool","name":"record_kpi"}`). Cache
+key is `sha256(model | kpi | system_prompt | user_prompt)` so
+prompt-rule changes invalidate cache.
+
+### 8.8 Evaluate (`evaluate.is_correct`)
+
+A prediction is correct iff (after canonical-unit normalisation)
+the unit and reporting year match gold and `|pred − gold| / gold ≤
+ε` with `ε = 0.01`. For BP scope_1:
+
+```
+pred: value=33,700,000  unit='tCO2e'  year=2024
+gold: value=33,700,000  unit='tCO2e'  year=2024
+|pred-gold|/gold = 0.0000   (ε = 0.01)
+is_correct: True
+```
+
+Aggregated across `(extractor, kpi)` slices, this drives the
+TP / FP / FN / precision / recall / F1 / coverage table in §6.13.
