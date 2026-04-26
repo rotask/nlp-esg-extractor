@@ -75,6 +75,17 @@ class LLMExtractor(Extractor):
             self._client = Anthropic()
         return self._client
 
+    def _cache_key(self, kpi_key: str, user_prompt: str, system_prompt: str) -> str:
+        """SHA256 of (model, kpi, system_prompt, user_prompt).
+
+        Including the system prompt ensures that prompt-rule changes
+        (e.g. new disambiguation rules) invalidate cached responses
+        rather than silently serving stale extractions.
+        """
+        return hashlib.sha256(
+            f"{self.model}|{kpi_key}|{system_prompt}|{user_prompt}".encode()
+        ).hexdigest()
+
     def _build_context(
         self,
         report: Any,
@@ -135,9 +146,7 @@ class LLMExtractor(Extractor):
             f"Document excerpts:\n{context}"
         )
 
-        cache_key = hashlib.sha256(
-            f"{self.model}|{kpi_key}|{user_prompt}".encode()
-        ).hexdigest()
+        cache_key = self._cache_key(kpi_key, user_prompt, _SYSTEM_PROMPT)
         cache_path = CACHE_DIR / "llm" / f"{cache_key}.json"
         tool_input: dict | None = None
         if cache_path.exists():

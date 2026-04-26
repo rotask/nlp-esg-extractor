@@ -140,6 +140,25 @@ def test_llm_gives_up_after_max_retries(indexed_stub):
     assert "api_error" in result.flags
 
 
+def test_cache_key_changes_when_system_prompt_changes(monkeypatch, tmp_path):
+    """Same (model, kpi, user_prompt) but different system_prompt -> different key."""
+    from nlp_esg.extractors import llm as llm_mod
+
+    ext = llm_mod.LLMExtractor()
+    k1 = ext._cache_key("scope_1_emissions", "user-text", "system-A")
+    k2 = ext._cache_key("scope_1_emissions", "user-text", "system-B")
+    assert k1 != k2
+
+
+def test_cache_key_stable_when_inputs_match():
+    from nlp_esg.extractors import llm as llm_mod
+
+    ext = llm_mod.LLMExtractor()
+    k1 = ext._cache_key("scope_1_emissions", "user-text", "system-A")
+    k2 = ext._cache_key("scope_1_emissions", "user-text", "system-A")
+    assert k1 == k2
+
+
 def test_llm_build_context_uses_multi_query_hybrid(monkeypatch):
     """LLMExtractor._build_context should consult kpi['queries'] (plural)."""
     from nlp_esg.extractors.llm import LLMExtractor
