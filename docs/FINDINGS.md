@@ -957,22 +957,92 @@ recognises the terminology `"Operational control boundary"` +
 `"Total energy consumption MWh"` even though the words don't
 overlap. MiniLM treats them as nearly unrelated.
 
-### 7.4 Takeaway
+### 7.4 Per-cell extraction-path comparison
 
-For broad page-level retrieval (the line-scanner path), MiniLM is
-fully sufficient and even slightly more decisive (higher per-page
-scores). For table-header recognition where domain-specific
-terminology dominates and few overlapping tokens exist between
-header and query, **a domain-trained embedding model is the
-load-bearing component**. On this corpus the gain is one cell
-(BP total_energy 134,448 MWh) — but the cell is structurally
-impossible to recover via the line scanner because the gold value
-sits in a flattened table row whose label-side tokens
-(`"Operational control boundary"`) don't carry KPI-keyword density.
+Both models use the same `BaselineExtractor` which tries the
+table-first path before falling back to the line scanner. The
+table path only fires if at least one table-header embedding has
+cosine sim ≥ `TAU_TABLE = 0.55` to the KPI query. This table
+captures every cell's outcome plus which path produced the value
+plus the best table-header cosine for both models:
 
-ClimateBERT's index also runs ~2× slower to build than MiniLM's
-(~10 min vs ~4 min for the 5-report corpus on CPU); the indexed
-cache amortises this across runs.
+| Cell | CB | ML | CB path | ML path | CB best-tbl-sim | ML best-tbl-sim |
+| --- | --- | --- | --- | --- | --- | --- |
+| BP scope_1 | OK | OK | line | line | 0.959 ✓ | 0.659 ✓ |
+| **BP total_energy** | **OK** | **MISS** | **table** | **—** | **0.947 ✓** | **0.396 ✗** |
+| BP water | OK | OK | line | line | 0.945 ✓ | 0.405 ✗ |
+| Enel scope_1 | OK | OK | line | line | 0.966 ✓ | 0.694 ✓ |
+| Enel total_energy | OK | OK | line | line | 0.961 ✓ | 0.486 ✗ |
+| Enel water | OK | OK | line | line | 0.963 ✓ | 0.513 ✗ |
+| Eni scope_1 | OK | OK | line | line | 0.958 ✓ | 0.613 ✓ |
+| Eni total_energy | OK | OK | line | line | 0.957 ✓ | 0.347 ✗ |
+| Eni water | OK | OK | line | line | 0.954 ✓ | 0.437 ✗ |
+| Iberdrola scope_1 | MISS | MISS | — | — | 0.963 ✓ | 0.626 ✓ |
+| Iberdrola total_energy | OK | OK | table | table | 0.957 ✓ | 0.631 ✓ |
+| Iberdrola water | OK | OK | line | line | 0.955 ✓ | 0.579 ✓ |
+| Shell scope_1 | MISS | MISS | — | — | 0.970 ✓ | 0.736 ✓ |
+| Shell total_energy | OK | OK | line | line | 0.966 ✓ | 0.504 ✗ |
+| Shell water | WRONG | WRONG | line | line | 0.967 ✓ | 0.475 ✗ |
+
+(✓ = passes TAU_TABLE so table path is available; ✗ = below
+threshold so table path is skipped entirely.)
+
+### 7.5 Where the models actually diverge
+
+**Table-path availability is the headline structural difference.**
+ClimateBERT's best table header passes TAU_TABLE for **15/15
+cells** with cosines clustered near 0.95–0.97. MiniLM passes for
+**7/15** with values mostly between 0.55 and 0.74; the other 8
+cells fall below 0.55 and the table path is dormant. The table
+candidates ClimateBERT considers don't always lead to a value
+(scope_1 cells fall through to the line scanner because the row
+labels don't hit the unit-family allow-list cleanly), but the
+candidates *exist* and could fire if the rest of the pipeline
+matched.
+
+**Line-scanner outcomes converge.** On 14 of 15 cells both
+models picked the same line and produced the same value. The
+line scanner uses lexical KPI-token matching + page-rank +
+"Total" prefix bonus + magnitude tiebreak — none of which depends
+on embedding quality once the gold page is in `top_n_pages = 25`,
+which holds for both models on every cell except Shell scope_1
+(both #15 ML / #17 CB → outside top-25 for ClimateBERT; gold
+ESRS aggregation is unsolvable for both).
+
+**The single TP delta (BP total_energy) is purely a table-path
+threshold cliff:**
+- ClimateBERT for the BP energy table on page 6: cosine = 0.929,
+  passes 0.55, table-first path matches the row labelled
+  `Energy consumption t l`, picks the year-2025 column = 134,448
+  GWh → canonical 134,448,000 MWh. ✓
+- MiniLM for the same table: cosine = 0.396, **skipped**.
+  Falls through to the line scanner, which on BP page 6 picks
+  scope_1 / scope_2 / methane lines (higher KPI-keyword density
+  per line), but no `total_energy_consumption` line scores high
+  enough to extract the right value.
+
+### 7.6 Takeaway for the writeup
+
+For a regex-and-retrieval pipeline operating on heterogeneous
+ESG PDFs, **embedding choice matters most for table-header
+recognition**. Where header tokens (`"Operational control
+boundary"`, `"Energy - Operational control boundary h,i,j"`,
+`"GHG-Equityshare"`) bear no surface overlap with the natural-
+language query but carry strong domain meaning, only a
+domain-trained model recognises the relationship; a
+general-purpose model treats them as nearly unrelated.
+
+For the rest of the pipeline (page-level retrieval, line
+scanning, value parsing) MiniLM is fully sufficient and even
+slightly more decisive — its per-page scores skew higher (e.g.
+Enel total_energy gold page: ClimateBERT 0.518 #14, MiniLM 1.000
+#1) because its narrower vocabulary and shorter vectors give
+fewer ways to dilute the signal across a large document.
+
+The total cost of the ClimateBERT advantage on this corpus is
+**+1 TP and ~6 minutes of additional embedding-time per run**.
+With the indexed cache, that 6-minute cost is paid once per
+report-and-model pair.
 
 ---
 
