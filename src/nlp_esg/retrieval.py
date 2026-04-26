@@ -191,3 +191,54 @@ def rank_pages_rrf(
         q_emb = embed_texts([q])[0]
         rankings.append(rank_pages_cosine(report, q_emb, unit_tokens=unit_tokens))
     return _rrf_combine(rankings, k=k)
+
+
+_BM25_TOK_RE = re.compile(r"[A-Za-z0-9]+")
+
+
+def _tokenize_for_bm25(text: str) -> list[str]:
+    return _BM25_TOK_RE.findall(text.lower())
+
+
+def _minmax(values: list[float]) -> list[float]:
+    if not values:
+        return []
+    lo, hi = min(values), max(values)
+    if hi - lo < 1e-12:
+        return [0.0] * len(values)
+    return [(v - lo) / (hi - lo) for v in values]
+
+
+def rank_pages_hybrid(
+    report: IndexedReport,
+    queries: list[str],
+    alpha: float = 0.5,
+    rrf_k: int = 60,
+) -> list[tuple[int, float]]:
+    """alpha * cosine_rrf + (1 - alpha) * bm25, both min-max normalised in [0,1]."""
+    from rank_bm25 import BM25Okapi
+
+    if not queries:
+        return []
+
+    rrf_ranking = rank_pages_rrf(report, queries, k=rrf_k)
+    rrf_by_page = dict(rrf_ranking)
+
+    page_nums = [p["page_num"] for p in report["pages"]]
+    corpus = [_tokenize_for_bm25(normalize_co2(p["text"])) for p in report["pages"]]
+    if not any(corpus):
+        return rrf_ranking
+    bm25 = BM25Okapi(corpus)
+    query_tokens = _tokenize_for_bm25(" ".join(queries))
+    bm25_scores = list(bm25.get_scores(query_tokens))
+
+    rrf_vals = [rrf_by_page.get(pn, 0.0) for pn in page_nums]
+    rrf_norm = _minmax(rrf_vals)
+    bm25_norm = _minmax(bm25_scores)
+
+    fused = [
+        (pn, alpha * r + (1 - alpha) * b)
+        for pn, r, b in zip(page_nums, rrf_norm, bm25_norm)
+    ]
+    fused.sort(key=lambda x: x[1], reverse=True)
+    return fused

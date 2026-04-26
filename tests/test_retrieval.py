@@ -100,6 +100,28 @@ def test_rank_pages_rrf_uses_multiple_queries(monkeypatch):
     assert out[-1][0] == 3
 
 
+def test_bm25_picks_page_with_rare_token(monkeypatch):
+    """Hybrid ranking should surface the page containing the rare query token."""
+    from nlp_esg.retrieval import rank_pages_hybrid
+    indexed = _ix(
+        pages=[
+            {"page_num": 1, "text": "long narrative paragraph about climate strategy"},
+            {"page_num": 2, "text": "Total Scope 1 GHG emissions MtCO2e 33.7 in 2024"},
+            {"page_num": 3, "text": "another narrative page about governance"},
+        ],
+        sentences=[
+            {"page_num": p, "text": "x",
+             "embedding": np.array([0.5, 0.5], dtype=np.float32)}
+            for p in (1, 2, 3)
+        ],
+        table_headers=[], tables=[],
+    )
+    fake_embed = lambda texts, model_name=None: np.array([[0.5, 0.5]] * len(texts), dtype=np.float32)
+    monkeypatch.setattr("nlp_esg.retrieval.embed_texts", fake_embed)
+    out = rank_pages_hybrid(indexed, ["Scope 1 emissions MtCO2e"])
+    assert out[0][0] == 2
+
+
 def test_rank_pages_cosine_unit_presence_boost():
     from nlp_esg.retrieval import rank_pages_cosine
     q = np.array([1.0, 0.0], dtype=np.float32)

@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv>=1",
     "reportlab>=4.0",
     "docling>=2,<3",
+    "rank-bm25>=0.2,<1",
 ]
 
 [project.optional-dependencies]
