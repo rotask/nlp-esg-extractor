@@ -7,6 +7,7 @@ DATA_DIR = ROOT / "data"
 REPORTS_DIR = DATA_DIR / "reports"
 LABELS_DIR = DATA_DIR / "labels"
 CACHE_DIR = DATA_DIR / "cache"
+RUNS_DIR = DATA_DIR / "runs"
 
 EMBEDDING_MODEL_NAME = os.environ.get("EMBEDDING_MODEL", "climatebert")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")

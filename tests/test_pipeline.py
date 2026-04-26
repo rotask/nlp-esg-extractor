@@ -29,3 +29,32 @@ def test_run_extraction_produces_rows_per_report_and_kpi(
     assert {e.kpi for e in extractions} == {
         "scope_1_emissions", "total_energy_consumption", "water_consumption",
     }
+
+
+def test_main_persists_extractions_with_run_tag(tmp_path, monkeypatch):
+    from nlp_esg import pipeline
+    from nlp_esg.types import KPIExtraction
+
+    monkeypatch.setattr(pipeline, "load_indexed_reports", lambda: ["fake"])
+    fake_extractions = [
+        KPIExtraction(
+            company="bp", report_year=2024, kpi="scope_1_emissions",
+            value=33.7e6, unit="tCO2e", reporting_year=2024,
+            source_snippet=None, source_page=None, confidence=0.9,
+            extractor="llm",
+        )
+    ]
+    monkeypatch.setattr(
+        pipeline, "run_extraction",
+        lambda r, include_llm=True: fake_extractions,
+    )
+    monkeypatch.setattr(pipeline, "load_gold_labels", lambda: [])
+    monkeypatch.setattr(pipeline, "RUNS_DIR", tmp_path)
+
+    pipeline.main(run_tag="v2_test")
+
+    csv_path = tmp_path / "v2_test" / "extractions.csv"
+    assert csv_path.exists()
+    df = pd.read_csv(csv_path)
+    assert "run_tag" in df.columns
+    assert (df["run_tag"] == "v2_test").all()

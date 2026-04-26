@@ -1,4 +1,6 @@
 from __future__ import annotations
+import argparse
+import dataclasses
 import logging
 from pathlib import Path
 from typing import Iterable
@@ -6,7 +8,7 @@ from typing import Iterable
 import pandas as pd
 
 from nlp_esg.compare import build_comparison_table
-from nlp_esg.config import KPI_KEYS, LABELS_DIR, REPORTS_DIR
+from nlp_esg.config import KPI_KEYS, LABELS_DIR, REPORTS_DIR, RUNS_DIR
 from nlp_esg.evaluate import evaluate
 from nlp_esg.extractors.baseline import BaselineExtractor
 from nlp_esg.extractors.llm import LLMExtractor
@@ -50,7 +52,6 @@ def load_gold_labels(path: Path | None = None) -> list[dict]:
         return []
     df = pd.read_csv(path)
     df = df.where(pd.notna(df), None)
-    # Coerce year fields to int where non-null
     for col in ("report_year", "reporting_year"):
         if col in df.columns:
             df[col] = df[col].apply(lambda v: int(v) if v is not None else None)
@@ -69,7 +70,21 @@ def run_evaluation(
     return pd.DataFrame(rows)
 
 
-def main() -> None:
+def _persist_run(
+    extractions: list[KPIExtraction],
+    metrics_df: pd.DataFrame | None,
+    run_tag: str,
+    runs_dir: Path,
+) -> None:
+    out_dir = runs_dir / run_tag
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows = [dataclasses.asdict(e) for e in extractions]
+    pd.DataFrame(rows).to_csv(out_dir / "extractions.csv", index=False)
+    if metrics_df is not None:
+        metrics_df.to_csv(out_dir / "metrics.csv", index=False)
+
+
+def main(run_tag: str = "v2_docling") -> None:
     try:
         from dotenv import load_dotenv
         load_dotenv()
@@ -83,6 +98,8 @@ def main() -> None:
         return
 
     extractions = run_extraction(indexed, include_llm=True)
+    for e in extractions:
+        e.run_tag = run_tag
 
     for extractor in ("baseline", "llm"):
         df = build_comparison_table(extractions, extractor=extractor)
@@ -90,14 +107,21 @@ def main() -> None:
         print(df)
 
     golds = load_gold_labels()
+    metrics_df: pd.DataFrame | None = None
     if golds:
-        metrics = run_evaluation(extractions, golds)
+        metrics_df = run_evaluation(extractions, golds)
         print("\n=== Evaluation ===")
-        print(metrics)
+        print(metrics_df)
     else:
         log.warning("No gold labels found at %s — skipping evaluation",
                     LABELS_DIR / "gold_labels.csv")
 
+    _persist_run(extractions, metrics_df, run_tag, RUNS_DIR)
+    log.info("Persisted run to %s/%s/", RUNS_DIR, run_tag)
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-tag", default="v2_docling")
+    args = parser.parse_args()
+    main(run_tag=args.run_tag)
