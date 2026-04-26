@@ -42,15 +42,9 @@ def _parse_filename(path: Path) -> tuple[str, int]:
     return m.group("company").lower(), int(m.group("year"))
 
 
-def parse_pdf(path: Path, use_cache: bool = True) -> ParsedReport:
-    """Parse a PDF into pages + tables. Caches to data/cache based on mtime."""
+def _parse_with_pdfplumber(path: Path) -> ParsedReport:
+    """Parse a PDF with pdfplumber. No caching — the caller handles cache."""
     company, year = _parse_filename(path)
-    cache_path = CACHE_DIR / f"{company}_{year}.pkl"
-
-    if use_cache and cache_path.exists() and cache_path.stat().st_mtime >= path.stat().st_mtime:
-        with cache_path.open("rb") as f:
-            return pickle.load(f)
-
     pages: list[Page] = []
     tables: list[TableEntry] = []
 
@@ -66,13 +60,25 @@ def parse_pdf(path: Path, use_cache: bool = True) -> ParsedReport:
                 rows = [[(c or "").strip() for c in row] for row in raw[1:]]
                 tables.append({"page_num": i, "headers": headers, "rows": rows})
 
-    report: ParsedReport = {
+    return {
         "company": company,
         "report_year": year,
         "parser": "pdfplumber",
         "pages": pages,
         "tables": tables,
     }
+
+
+def parse_pdf(path: Path, use_cache: bool = True) -> ParsedReport:
+    """Parse a PDF into pages + tables. Caches to data/cache based on mtime."""
+    company, year = _parse_filename(path)
+    cache_path = CACHE_DIR / f"{company}_{year}_pdfplumber.pkl"
+
+    if use_cache and cache_path.exists() and cache_path.stat().st_mtime >= path.stat().st_mtime:
+        with cache_path.open("rb") as f:
+            return pickle.load(f)
+
+    report = _parse_with_pdfplumber(path)
 
     if use_cache:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
