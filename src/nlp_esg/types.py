@@ -15,3 +15,4 @@ class KPIExtraction:
     confidence: float | None
     extractor: str
     flags: list[str] = field(default_factory=list)
+    run_tag: str | None = None

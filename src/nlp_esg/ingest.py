@@ -28,6 +28,7 @@ class TableEntry(TypedDict):
 class ParsedReport(TypedDict):
     company: str
     report_year: int
+    parser: str
     pages: list[Page]
     tables: list[TableEntry]
 
@@ -68,6 +69,7 @@ def parse_pdf(path: Path, use_cache: bool = True) -> ParsedReport:
     report: ParsedReport = {
         "company": company,
         "report_year": year,
+        "parser": "pdfplumber",
         "pages": pages,
         "tables": tables,
     }
