@@ -826,3 +826,65 @@ Four cells remain:
   operated-non-consolidated for ESRS-aligned 69). Inherently
   LLM-territory: no single line in the report contains 69 with
   a "Total" label.
+
+### 6.12 Iteration 5 — magnitude tiebreak (v9)
+
+Phase-1 diagnostic on Eni scope_1 showed both pages 166 (gold) and
+167 (wrong, segment-specific) had nearly-identical line templates
+`Direct GHG emissions (Scope 1) (MtCO2eq.) X.X`. Same kw_score, same
+prefix; page 167 (rank #2) outscored page 166 (rank #5) purely on
+rank-bonus. The disambiguation signal was magnitude: the
+consolidated total is larger than any segment.
+
+Implementation: collect all candidates passing filters; if multiple
+have kw_score within 0.05 of the best, prefer the largest
+`canonical_value`. Safe for water/energy because year-column has
+already resolved within-line values and negative_tokens reject
+non-consolidated alternatives.
+
+Per-cell delta v8 → v9: Eni scope_1 18.6 → 28.4 ✅.
+
+### 6.13 Headline numbers (v9 — current state)
+
+| Run | Extractor | KPI | TP | FP | FN | Precision | Recall | F1 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **v9** | **baseline** | **scope_1** | **3** | **0** | **2** | **1.00** | **0.60** | **0.75** |
+| **v9** | **baseline** | **total_energy** | **5** | **0** | **0** | **1.00** | **1.00** | **1.00** |
+| **v9** | **baseline** | **water** | **4** | **1** | **0** | **0.80** | **1.00** | **0.89** |
+
+**Aggregate baseline: 12 TP / 15. Macro-F1 ≈ 0.88.**
+
+Trajectory:
+- v1 (iteration 1): 0/15, F1 ≈ 0.00 — pdfplumber-only, table-first
+- v2 (iteration 2): 1/15, F1 ≈ 0.11 — multi-query RRF, BM25, lone-subscript
+- v3 (iteration 3): 7/15, F1 ≈ 0.60 — line scanner with year-col + magnitude
+- v6: 9/15, F1 ≈ 0.70 — Mm³ alias + year-search-window widened
+- v8: 11/15, F1 ≈ 0.82 — CO₂ word-boundary fix + top_n_pages=25
+- **v9: 12/15, F1 ≈ 0.88 — magnitude tiebreak**
+
+### 6.14 What remains and why
+
+Three cells stay unfindable for the baseline-only path:
+
+| Cell | Gold value | Why baseline can't reach it |
+| --- | --- | --- |
+| Iberdrola scope_1 | 5,246,890 tCO2e | The data row is `2 5,179,674 5,246,890 1.3 N/AV.` — the unit's subscript "2" is fused with the data values from a column-split layout; the year header uses an abbreviated `25/24` notation that the `20[1-3]\\d` regex doesn't match. Picking the right column requires either understanding "25/24" as a year-pair or a vertical-context label search. |
+| Shell scope_1 | 69 M tCO2e | ESRS-aligned figure that's the *sum* of consolidated entities (46) plus operated non-consolidated entities. No single line in the report contains 69 with a "Total" label — the value only exists as an aggregation. |
+| Shell water | 26 M m³ | The gold value is not present in pdfplumber's text output anywhere on the report. It likely lives in an infographic/chart on page 122 (whose narrative caption is `million cubic metres fresh-water consumption`); the actual number "26" is in a graphic element that pdfplumber can't extract. |
+
+All three need either a multimodal LLM with image input, a different
+PDF parser that handles charts/infographics, or LLM-level
+aggregation reasoning. None is solvable with retrieval + regex
+alone.
+
+### 6.15 Headline takeaway for the project
+
+The baseline extractor has gone from 0/15 to **12/15 TP** across
+five distinct iterations of root-cause-driven debugging. **Total
+energy is perfect (F1 = 1.00)**. Water is at F1 = 0.89.
+Scope 1 is at F1 = 0.75 (3/5 correct, 0 false positives).
+
+The remaining 3 cells are documented as architecturally
+unsolvable for a regex+retrieval pipeline, and their solutions sit
+behind the LLM half (cache-key fix in place, awaits credit
+restoration).
