@@ -172,8 +172,14 @@ class BaselineExtractor(Extractor):
 
             best_row_idx = None
             best_row_score = 0.0
+            negative_tokens = [t.lower() for t in kpi.get("negative_tokens", [])]
             for ri, row in enumerate(rows):
                 if not row:
+                    continue
+                row_label = (row[0] or "").lower()
+                # Reject rows that match a per-KPI negative token (e.g. a
+                # 'renewable production' row when extracting total energy).
+                if any(neg in row_label for neg in negative_tokens):
                     continue
                 rs = _row_score(kpi["query"], query_tokens, row[0] or "")
                 if rs > best_row_score:
@@ -277,9 +283,9 @@ class BaselineExtractor(Extractor):
         queries = list(kpi.get("queries") or [kpi["query"]])
         ranked = rank_pages_hybrid(report, queries)
         top_pages = [pn for pn, _ in ranked[:top_n_pages]]
+        page_rank = {pn: i for i, pn in enumerate(top_pages)}
         pages_by_num = {p["page_num"]: p for p in report["pages"]}
 
-        # KPI relevance vocabulary: keywords from the query strings, length > 3.
         kpi_tokens: set[str] = set()
         for q in queries:
             for tok in re.findall(r"[A-Za-z]+", q.lower()):
@@ -295,7 +301,8 @@ class BaselineExtractor(Extractor):
             if page is None:
                 continue
             text = normalize_co2(page["text"])
-            for line in text.split("\n"):
+            page_lines = text.split("\n")
+            for li, line in enumerate(page_lines):
                 stripped = line.strip()
                 if len(stripped) < 10:
                     continue
@@ -308,12 +315,22 @@ class BaselineExtractor(Extractor):
                 kw_score = kw_hits / max(1, len(kpi_tokens))
                 if kw_score < min_kw_score:
                     continue
+
                 pv = parse_value(stripped, kpi_unit_family=kpi["unit_family"])
                 if pv is None:
                     continue
                 raw_value, unit = pv
                 if unit not in unit_family_canonicals:
                     continue
+
+                # Year-column awareness: if a year header sits nearby, use it
+                # to pick the column on this data line. Magnitude is preserved
+                # via ratio scaling: raw_value * (target_col_num / first_data_num).
+                adjusted = self._pick_year_column_value(
+                    page_lines, li, stripped, raw_value
+                )
+                if adjusted is not None:
+                    raw_value = adjusted
                 try:
                     canonical_value = to_canonical_value(
                         raw_value, unit, kpi["canonical_unit"]
@@ -324,8 +341,17 @@ class BaselineExtractor(Extractor):
                     if "out_of_range" not in flags:
                         flags.append("out_of_range")
                     continue
-                if best is None or kw_score > best[0]:
-                    best = (kw_score, canonical_value, stripped, unit, pn)
+
+                # Page-rank bonus: lines on the top-ranked page outscore lines
+                # on lower-ranked pages with similar keyword density.
+                rank_bonus = 0.5 * (1.0 - page_rank[pn] / max(1, len(top_pages)))
+                # 'Total' prefix bonus: the line that starts with 'Total ...'
+                # is structurally the consolidated row.
+                total_bonus = 0.3 if line_lower.lstrip("|").lstrip().startswith("total ") else 0.0
+                score = kw_score + rank_bonus + total_bonus
+
+                if best is None or score > best[0]:
+                    best = (score, canonical_value, stripped, unit, pn)
 
         if best is None:
             return None
@@ -344,3 +370,64 @@ class BaselineExtractor(Extractor):
             extractor=self.name,
             flags=flags,
         )
+
+    @staticmethod
+    def _pick_year_column_value(
+        page_lines: list[str],
+        line_idx: int,
+        data_line: str,
+        raw_value: float,
+    ) -> float | None:
+        """Adjust raw_value to the most-recent-year column when a year-row is
+        nearby. Returns the magnitude-preserved value at that column, or None
+        if no usable year-row context is found.
+
+        Magnitude preservation: the data line may contain a magnitude word
+        like 'million' that parse_value already factored into raw_value. We
+        scale by the ratio (target_col_num / first_data_num) so the magnitude
+        carries through, regardless of whether the unit is '(MWh)' or
+        'million MWh'.
+
+        Robustness:
+        - Search ±5 lines above and ±2 below (year-rows are usually headers).
+        - Year row must contain >= 2 sequential years in 2010-2030 with no gaps.
+        - Data line numbers are sliced from the END (last N), since the noise
+          digits ('1' in 'Scope 1', '2' in 'MtCO2e') sit BEFORE the data values.
+        """
+        from nlp_esg.normalize import parse_number
+
+        year_re = re.compile(r"\b(20[1-3]\d)\b")
+        # Search above first (year-rows are header rows), then below.
+        for offset in (-1, -2, -3, -4, -5, 1, 2):
+            idx = line_idx + offset
+            if not (0 <= idx < len(page_lines)):
+                continue
+            ymatches = list(year_re.finditer(page_lines[idx]))
+            if len(ymatches) < 2:
+                continue
+            years = [int(m.group(0)) for m in ymatches]
+            # Sequential check: max - min must equal len - 1 (no gaps, no dupes)
+            if max(years) - min(years) != len(years) - 1:
+                continue
+            n_years = len(years)
+            most_recent = max(years)
+            col_idx = years.index(most_recent)
+
+            # Parse all numbers on the data line and slice the LAST n_years
+            # (the noise digits sit before the data values in a tabular row).
+            num_re = re.compile(r"[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|[-+]?\d+(?:[.,]\d+)?")
+            parsed: list[float] = []
+            for s in num_re.findall(data_line):
+                try:
+                    parsed.append(parse_number(s))
+                except ValueError:
+                    continue
+            if len(parsed) < n_years:
+                continue
+            data_nums = parsed[-n_years:]
+            first_num = data_nums[0]
+            target_num = data_nums[col_idx]
+            if first_num == 0:
+                continue
+            return raw_value * (target_num / first_num)
+        return None

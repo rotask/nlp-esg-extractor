@@ -2,14 +2,16 @@ from __future__ import annotations
 import numpy as np
 
 import logging
+import pickle
 import re
 from collections import defaultdict
 from functools import lru_cache
+from pathlib import Path
 from typing import TypedDict
 
 from sentence_transformers import SentenceTransformer, models
 
-from nlp_esg.config import EMBEDDING_MODEL_NAME
+from nlp_esg.config import CACHE_DIR, EMBEDDING_MODEL_NAME
 from nlp_esg.ingest import ParsedReport, Page, TableEntry
 from nlp_esg.normalize import normalize_co2
 
@@ -96,7 +98,44 @@ def split_sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-def build_index(report: ParsedReport, model_name: str | None = None) -> IndexedReport:
+def _index_cache_path(report: ParsedReport, model_name: str) -> Path:
+    """Cache path for the IndexedReport (parsed text + embeddings)."""
+    parser = report.get("parser", "pdfplumber")
+    return CACHE_DIR / (
+        f"{report['company']}_{report['report_year']}_{parser}_indexed_{model_name}.pkl"
+    )
+
+
+def build_index(
+    report: ParsedReport,
+    model_name: str | None = None,
+    use_cache: bool = True,
+) -> IndexedReport:
+    """Add per-sentence + per-table-header embeddings to a parsed report.
+
+    Embeddings are expensive (ClimateBERT forward pass per sentence on CPU);
+    a per-(report, parser, model) pickle cache amortises this over repeated
+    pipeline runs. Cache invalidates implicitly when ParsedReport content
+    changes (the parsed-report pkl path includes the parser tag, so a
+    different upstream parser produces a different cache key).
+    """
+    name = model_name or EMBEDDING_MODEL_NAME
+    cache_path = _index_cache_path(report, name)
+    if use_cache and cache_path.exists():
+        try:
+            with cache_path.open("rb") as f:
+                cached = pickle.load(f)
+            # Sanity check: cached company/year must match — guards against
+            # stale caches when filenames collide.
+            if (cached.get("company") == report["company"]
+                    and cached.get("report_year") == report["report_year"]
+                    and len(cached.get("pages", [])) == len(report["pages"])):
+                log.info("loaded indexed cache for %s/%d (%s)",
+                         report["company"], report["report_year"], name)
+                return cached
+        except (pickle.UnpicklingError, EOFError, OSError) as e:
+            log.warning("corrupt indexed cache %s (%s); rebuilding", cache_path, e)
+
     sentences: list[Sentence] = []
     sent_texts: list[str] = []
     sent_pages: list[int] = []
@@ -105,26 +144,23 @@ def build_index(report: ParsedReport, model_name: str | None = None) -> IndexedR
             sent_texts.append(s)
             sent_pages.append(page["page_num"])
 
-    sent_embs = embed_texts(sent_texts, model_name=model_name)
+    sent_embs = embed_texts(sent_texts, model_name=name)
     for i, (text, page) in enumerate(zip(sent_texts, sent_pages)):
         sentences.append({"page_num": page, "text": text, "embedding": sent_embs[i]})
 
     header_strings: list[str] = []
     for t in report["tables"]:
-        # Include the first 5 row labels alongside the headers — for tables
-        # whose semantic content lives in row[0] (Eni-style), the headers
-        # alone (e.g. ['', '2024', '2023']) carry no KPI signal.
         parts = [h for h in t["headers"] if h]
         parts.extend(row[0] for row in t["rows"][:5] if row and row[0])
         header_strings.append(" | ".join(parts))
 
-    header_embs = embed_texts(header_strings, model_name=model_name)
+    header_embs = embed_texts(header_strings, model_name=name)
     table_headers: list[TableHeaderEmb] = [
         {"table_idx": i, "header_string": hs, "embedding": header_embs[i]}
         for i, hs in enumerate(header_strings)
     ]
 
-    return {
+    indexed: IndexedReport = {
         "company": report["company"],
         "report_year": report["report_year"],
         "pages": report["pages"],
@@ -132,6 +168,15 @@ def build_index(report: ParsedReport, model_name: str | None = None) -> IndexedR
         "sentences": sentences,
         "table_headers": table_headers,
     }
+
+    if use_cache:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            with cache_path.open("wb") as f:
+                pickle.dump(indexed, f)
+        except OSError as e:
+            log.warning("failed to write indexed cache %s: %s", cache_path, e)
+    return indexed
 
 
 def rank_pages_cosine(

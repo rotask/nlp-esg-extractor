@@ -79,6 +79,7 @@ _UNIT_ALIASES: dict[str, str] = {
     "m3": "m3", "m³": "m3", "cubic metres": "m3", "cubic meters": "m3",
     "ml": "ML", "megalitres": "ML", "megaliters": "ML",
     "kl": "kL", "thousand m3": "kL",  # placeholder - overwritten below to ML (intentional two-step)
+    "mm3": "Mm3", "mm³": "Mm3",        # million m3 (e.g. Eni 'Mm3' header)
 }
 
 # Per ESG reporting convention, "thousand m3" == 1000 m3 == 1 ML. The two-step
@@ -113,6 +114,7 @@ _CONVERSIONS: dict[tuple[str, str], float] = {
     ("m3", "m3"): 1.0,
     ("kL", "m3"): 1.0,       # 1 kL = 1 m3
     ("ML", "m3"): 1e3,       # 1 megalitre = 1000 m3
+    ("Mm3", "m3"): 1e6,      # 1 megam3 (million m3) = 1,000,000 m3
 }
 
 
