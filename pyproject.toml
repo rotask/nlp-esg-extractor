@@ -16,6 +16,7 @@ dependencies = [
     "numpy>=1.26",
     "python-dotenv>=1",
     "reportlab>=4.0",
+    "docling>=2,<3",
 ]
 
 [project.optional-dependencies]
