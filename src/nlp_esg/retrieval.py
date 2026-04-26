@@ -111,8 +111,12 @@ def build_index(report: ParsedReport, model_name: str | None = None) -> IndexedR
 
     header_strings: list[str] = []
     for t in report["tables"]:
-        header_str = " | ".join(h for h in t["headers"] if h)
-        header_strings.append(header_str)
+        # Include the first 5 row labels alongside the headers — for tables
+        # whose semantic content lives in row[0] (Eni-style), the headers
+        # alone (e.g. ['', '2024', '2023']) carry no KPI signal.
+        parts = [h for h in t["headers"] if h]
+        parts.extend(row[0] for row in t["rows"][:5] if row and row[0])
+        header_strings.append(" | ".join(parts))
 
     header_embs = embed_texts(header_strings, model_name=model_name)
     table_headers: list[TableHeaderEmb] = [

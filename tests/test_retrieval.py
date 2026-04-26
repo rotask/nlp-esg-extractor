@@ -100,6 +100,36 @@ def test_rank_pages_rrf_uses_multiple_queries(monkeypatch):
     assert out[-1][0] == 3
 
 
+def test_build_index_table_header_includes_row_labels(monkeypatch):
+    """Embedded header_string should include row[0] of first 5 rows."""
+    from nlp_esg.retrieval import build_index
+
+    captured: list[list[str]] = []
+
+    def fake_embed(texts, model_name=None):
+        captured.append(list(texts))
+        return np.zeros((len(texts), 4), dtype=np.float32)
+
+    monkeypatch.setattr("nlp_esg.retrieval.embed_texts", fake_embed)
+
+    parsed = {
+        "company": "eni", "report_year": 2024, "parser": "pdfplumber",
+        "pages": [{"page_num": 1, "text": "x"}],
+        "tables": [{
+            "page_num": 1,
+            "headers": ["", "2024", "2023"],
+            "rows": [
+                ["Total gross Scope 1 GHG emissions (MtCO2eq)", "18.95", "20.20"],
+                ["Methane emissions", "0.5", "0.6"],
+            ],
+        }],
+    }
+    build_index(parsed)
+    # The second embed_texts call is for table headers.
+    header_strings = captured[1]
+    assert any("Total gross Scope 1 GHG emissions" in hs for hs in header_strings)
+
+
 def test_bm25_picks_page_with_rare_token(monkeypatch):
     """Hybrid ranking should surface the page containing the rare query token."""
     from nlp_esg.retrieval import rank_pages_hybrid
