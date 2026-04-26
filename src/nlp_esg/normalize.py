@@ -91,8 +91,13 @@ _UNIT_ALIASES["thousand m3"] = "ML"
 
 
 def canonicalize_unit(unit: str) -> str:
-    """Map a written unit to its canonical form. Raises ValueError if unknown."""
-    key = unit.strip().lower()
+    """Map a written unit to its canonical form. Raises ValueError if unknown.
+
+    Strips trailing punctuation (`.,;:`) — LLMs sometimes return units like
+    'MtCO2eq.' or 'tCO2e,' picked up from in-line text where punctuation
+    follows the unit token.
+    """
+    key = unit.strip().rstrip(".,;:").lower()
     if key in _UNIT_ALIASES:
         return _UNIT_ALIASES[key]
     raise ValueError(f"Unknown unit: {unit!r}")

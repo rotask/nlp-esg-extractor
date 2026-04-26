@@ -163,7 +163,11 @@ class LLMExtractor(Extractor):
         else:
             query_emb = embed_texts([kpi_query])[0]
             ranked = rank_pages_cosine(report, query_emb, unit_tokens=kpi_unit_family)
-        top_pages = ranked[:12]
+        # Match the baseline line-scanner's top_n_pages=25 within reason. 16 is
+        # enough to catch gold pages that rank in the early teens (e.g. Enel
+        # total_energy gold page 150 ranks #14 with ClimateBERT). Going higher
+        # would dilute the model's focus on long contexts.
+        top_pages = ranked[:16]
         top_page_nums = {pn for pn, _ in top_pages}
 
         pages_by_num = {p["page_num"]: p for p in report["pages"]}

@@ -72,6 +72,15 @@ def test_canonicalize_unit_emissions():
     assert canonicalize_unit("ktCO2e") == "ktCO2e"
 
 
+def test_canonicalize_unit_strips_trailing_punctuation():
+    """Gemini sometimes returns 'MtCO2eq.' or 'tCO2e,' — trailing punctuation
+    must not block recognition of an otherwise valid unit token."""
+    assert canonicalize_unit("MtCO2eq.") == "MtCO2e"
+    assert canonicalize_unit("tCO2e,") == "tCO2e"
+    assert canonicalize_unit("MWh.") == "MWh"
+    assert canonicalize_unit("m3;") == "m3"
+
+
 def test_canonicalize_unit_water():
     assert canonicalize_unit("m³") == "m3"
     assert canonicalize_unit("cubic metres") == "m3"
