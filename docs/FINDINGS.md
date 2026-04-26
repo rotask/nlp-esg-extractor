@@ -751,3 +751,78 @@ remaining theoretical ceiling for the baseline-only path on this
 corpus is probably ~10–11/15; getting beyond that needs the LLM
 half to come back online or a different retrieval strategy
 (see §6.7's three retrieval-layer cells).
+
+### 6.9 Iteration 4 — `normalize_co2` anchor + `top_n_pages` widening
+
+Phase-1 diagnostics on the v6 retrieval-layer failures gave a clean
+breakdown by root cause: 2 cells where the gold page was outside
+the line scanner's `top_n_pages=8` window (Enel total_energy at
+rank #14, Enel scope_1 at #24), 1 page-text-corruption bug, and
+several still-unsolvable cases.
+
+**The CO₂ corruption bug.** `_CO2_NEXT_LINE` matched `co` inside
+`Scope` and then the greedy `[^\n]*` consumed the rest of the line —
+inserting `2eq` inside the word and producing `Sco2eqpe`, while
+also leaving the legitimate `MtCO` un-fixed afterward. On Enel
+page 147 (the scope_1 gold page) every `Scope 1` line was corrupted
+this way, which depressed the page's BM25 + cosine score from
+what should have been near-top-3 down to rank #24, *and* made the
+gold line `Total gross Scope 1 GHG emissions(1) MtCO2eq 18.95 ...`
+unparseable. Fix: a non-letter lookbehind on the CO patterns. Test:
+`test_normalize_co2_does_not_corrupt_scope_word`.
+
+**The top-N window.** Widening `top_n_pages` from 8 to 25 brings
+the gold pages for both Enel cells into scope. Phase 1 confirmed
+analytically that the gold lines would outscore the previously
+picked wrong lines — by 0.09 (Enel scope_1) and by a wide margin
+(Enel total_energy). v8 confirmed empirically.
+
+The CO₂ fix on its own (v7) showed no behavioural change — the
+real lift came when CO₂ + top-N were both in place, because
+fixing the corruption requires the page to be in scope to matter.
+
+### 6.10 Headline numbers (v8)
+
+| Run | Extractor | KPI | TP | FP | FN | Precision | Recall | F1 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **v8** | **baseline** | **scope_1** | **2** | **1** | **2** | **0.67** | **0.50** | **0.57** |
+| **v8** | **baseline** | **total_energy** | **5** | **0** | **0** | **1.00** | **1.00** | **1.00** |
+| **v8** | **baseline** | **water** | **4** | **1** | **0** | **0.80** | **1.00** | **0.89** |
+
+Aggregate baseline: **11 TP / 15** (v6: 9, v3: 7, v2: 1).
+Macro-F1 ≈ **0.82** (v6: 0.70).
+
+**`total_energy_consumption` is now perfect** — 5/5 TP, 0 FP, 0 FN.
+The combination of multi-query RRF + BM25 hybrid retrieval +
+the line scanner with year-column awareness + magnitude-prefix
+parsing covers every variant in the corpus: BP datasheet table,
+Eni MWh-row, Iberdrola table, Shell `million MWh`, Enel narrative
+`168.59 TWh totaled` sentence.
+
+### 6.11 What's still wrong (v8)
+
+Four cells remain:
+
+- **Eni scope_1** (page 167 rank #2 outranks gold page 166 #5):
+  both pages have nearly-identical `Direct GHG emissions (Scope 1)
+  (MtCO2eq.) X.X` lines but with different values (gold 28.4
+  consolidated, picked 18.6 segment-specific). Same template,
+  same keyword density — the rank-bonus alone determines the
+  outcome. Needs either a "prefer larger value" tiebreak (safe
+  for emissions, where consolidated > segment) or a section-
+  awareness signal.
+
+- **Shell water** (72 M wrong vs gold 26 M): line `around 72
+  million cubic metres of fresh water consumed` is a facility-
+  level narrative on the right page. The gold 26 M total may
+  not have a clean labelled-line form on this corpus.
+
+- **Iberdrola scope_1**: gold page 48 ranks #1, but the gold
+  value `5,246,890` lives on a row that's just numbers
+  (`2 5,179,674 5,246,890 1.3 N/AV.`) — no KPI keywords on the
+  same line. Needs vertical-context label search, or LLM.
+
+- **Shell scope_1**: ESRS aggregation (consolidated 46 +
+  operated-non-consolidated for ESRS-aligned 69). Inherently
+  LLM-territory: no single line in the report contains 69 with
+  a "Total" label.
