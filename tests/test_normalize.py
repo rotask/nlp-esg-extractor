@@ -172,3 +172,39 @@ def test_lone_subscript_2_does_not_corrupt_normal_text():
     raw = "Methodology section.\n2\nThis paragraph discusses scope 1."
     out = normalize_co2(raw)
     assert out == raw
+
+
+def test_parse_value_magnitude_before_unit_before_number():
+    """Shell pattern: 'million MWh 269' -> 269 * 1e6 MWh."""
+    out = parse_value("Total energy consumption [A] million MWh 269 289",
+                      kpi_unit_family=["MWh", "GWh"])
+    assert out == (269_000_000.0, "MWh")
+
+
+def test_parse_value_unit_in_parens_then_number():
+    """Eni pattern: '(MWh) 84,399,860 ...' — unit wrapped in parens."""
+    out = parse_value(
+        "Total energy consumption(b) (MWh) 84,399,860 31,146,286 92,738,602",
+        kpi_unit_family=["MWh"],
+    )
+    assert out == (84_399_860.0, "MWh")
+
+
+def test_parse_value_millionm3_token_split():
+    """BP pattern: 'millionm 3' -> split into 'million' + 'm3' for parsing."""
+    out = parse_value(
+        "Freshwater consumption | millionm 3 | 53.6 | 51.7 | 47.4 | 46.5 | 47.3",
+        kpi_unit_family=["m3"],
+    )
+    # First number after the unit-magnitude token is 53.6 ⇒ 53.6 × 1e6
+    assert out == (53_600_000.0, "m3")
+
+
+def test_parse_value_dot_zero_zero_zero_thousand():
+    """Enel pattern: '.000 m3 32,141' represents 'thousand m3' = 32,141 × 1000."""
+    out = parse_value(
+        "Total water consumption .000 m3 32,141 30,881 1,260 4.1%",
+        kpi_unit_family=["m3", "ML"],
+    )
+    # thousand m3 32,141 -> 32,141 × 1000 m3 = 32,141,000 m3
+    assert out == (32_141_000.0, "m3")

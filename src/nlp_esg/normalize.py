@@ -134,6 +134,36 @@ def to_canonical_value(value: float, unit: str, canonical: str) -> float:
 _MAGNITUDE = {"thousand": 1e3, "million": 1e6, "billion": 1e9}
 _NUMBER_RE = r"[-+]?\d{1,3}(?:[,\s]\d{3})+(?:\.\d+)?|[-+]?\d+(?:[.,]\d+)?"
 
+# When scanning free text we must NOT treat space-as-thousands greedily,
+# because pdfplumber-extracted year columns look like "269 289" and would be
+# misread as the single number 269,289. Comma-thousands stays allowed.
+_NUMBER_IN_TEXT_RE = r"[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|[-+]?\d+(?:[.,]\d+)?"
+
+# Separator allowed between a unit token and its associated value when the unit
+# precedes the number (tabular flattened text often uses "|", "(", ")", ".", or
+# whitespace as separators).
+_UNIT_VALUE_SEP = r"[^A-Za-z0-9]{1,8}"
+
+# PDF rendering quirks where a unit + magnitude lose their separator.
+# Applied as a pre-pass before parse_value's regexes run.
+_UNIT_RENDER_FIXUPS = [
+    # "millionm 3" / "millionm3" / "thousandm 3" / "billionm 3" -> split magnitude from m3
+    (re.compile(r"\b(thousand|million|billion)m\s*3\b", re.IGNORECASE),
+     lambda m: f"{m.group(1).lower()} m3"),
+    # ".000 m3" / ".000m3" -> "thousand m3" (the dot-zero-zero-zero is the way some
+    # ESG datasheets render the "in thousands" column annotation)
+    (re.compile(r"\.000\s*m\s*3\b", re.IGNORECASE), lambda m: "thousand m3"),
+    # "m 3" with whitespace -> "m3"  (catches lone "m\s+3" not preceded by a magnitude word)
+    (re.compile(r"\bm\s+3\b"), lambda m: "m3"),
+]
+
+
+def _normalize_for_parse(text: str) -> str:
+    """Apply unit-rendering fixups so parse_value's regexes see canonical-ish tokens."""
+    for pat, repl in _UNIT_RENDER_FIXUPS:
+        text = pat.sub(repl, text)
+    return text
+
 
 def parse_value(
     text: str, kpi_unit_family: list[str]
@@ -141,9 +171,11 @@ def parse_value(
     """
     Find the first (number, unit) pair in `text` whose unit canonicalizes to one
     of the KPI's allowed units. Returns (value, canonical_unit) or None.
-    Handles magnitude words ("1.2 million m³") by multiplying in.
+    Handles magnitude words ("1.2 million m³") by multiplying in, and the common
+    PDF tabular shapes "(MWh) 84,399,860" and "million MWh 269".
     """
-    # Build a sorted list of accepted unit strings (longest first so "ktCO2e" matches before "tCO2e").
+    text = _normalize_for_parse(text)
+
     accepted_canonicals = set()
     for u in kpi_unit_family:
         try:
@@ -151,17 +183,17 @@ def parse_value(
         except ValueError:
             continue
 
-    # Pattern: number (whitespace) (optional magnitude word) (whitespace) unit
     unit_alt = "|".join(
         sorted((re.escape(u) for u in _UNIT_ALIASES), key=len, reverse=True)
     )
     mag_alt = "|".join(_MAGNITUDE)
-    pattern = re.compile(
-        rf"({_NUMBER_RE})\s*(?:({mag_alt})\s*)?({unit_alt})(?![A-Za-z0-9])",
+
+    # Forward: number (magnitude?) unit  e.g. "1.2 million m³", "47.3 m3"
+    forward = re.compile(
+        rf"({_NUMBER_IN_TEXT_RE})\s*(?:({mag_alt})\s*)?({unit_alt})(?![A-Za-z0-9])",
         re.IGNORECASE,
     )
-
-    for m in pattern.finditer(text):
+    for m in forward.finditer(text):
         raw_num, magnitude, raw_unit = m.group(1), m.group(2), m.group(3)
         try:
             value = parse_number(raw_num)
@@ -176,14 +208,31 @@ def parse_value(
         if canonical in accepted_canonicals:
             return value, canonical
 
-    # Secondary scan: unit-before-number (common in tabular PDF text where the
-    # unit appears as a column header before a row of values).
-    # Return the FIRST number following the unit (= most-recent year column).
-    rev_pattern = re.compile(
-        rf"({unit_alt})\s+({_NUMBER_RE})",
+    # Reverse with magnitude: magnitude unit number  e.g. "million MWh 269"
+    mag_rev = re.compile(
+        rf"({mag_alt})\s+({unit_alt}){_UNIT_VALUE_SEP}({_NUMBER_IN_TEXT_RE})",
         re.IGNORECASE,
     )
-    for m in rev_pattern.finditer(text):
+    for m in mag_rev.finditer(text):
+        magnitude, raw_unit, raw_num = m.group(1), m.group(2), m.group(3)
+        try:
+            canonical = canonicalize_unit(raw_unit)
+        except ValueError:
+            continue
+        if canonical not in accepted_canonicals:
+            continue
+        try:
+            value = parse_number(raw_num)
+        except ValueError:
+            continue
+        return value * _MAGNITUDE[magnitude.lower()], canonical
+
+    # Reverse plain: unit number  e.g. "MWh 269", "(MWh) 84,399,860"
+    rev = re.compile(
+        rf"({unit_alt}){_UNIT_VALUE_SEP}({_NUMBER_IN_TEXT_RE})",
+        re.IGNORECASE,
+    )
+    for m in rev.finditer(text):
         raw_unit, raw_num = m.group(1), m.group(2)
         try:
             canonical = canonicalize_unit(raw_unit)
