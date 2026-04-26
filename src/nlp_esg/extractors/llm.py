@@ -332,9 +332,14 @@ class LLMExtractor(Extractor):
         config = {
             "system_instruction": system_prompt,
             "temperature": 0,
-            "max_output_tokens": 500,
+            "max_output_tokens": 1024,
             "tools": _GEMINI_TOOLS,
             "tool_config": _GEMINI_TOOL_CONFIG,
+            # Gemini 2.5 enables "thinking" by default; on long contexts it
+            # exhausts the response budget before emitting a function_call,
+            # leaving us with HTTP 200 + empty response. Tool-use doesn't
+            # benefit from chain-of-thought, so disable.
+            "thinking_config": {"thinking_budget": 0},
         }
         resp = client.models.generate_content(
             model=self.model, contents=user_prompt, config=config,
