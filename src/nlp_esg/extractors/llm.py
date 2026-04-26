@@ -103,6 +103,7 @@ class LLMExtractor(Extractor):
         max_retries: int = 3,
         retry_base_delay: float = 1.0,
         provider: str | None = None,
+        min_call_interval_s: float | None = None,
     ):
         if provider is None:
             provider = os.environ.get("LLM_PROVIDER", "anthropic")
@@ -115,10 +116,16 @@ class LLMExtractor(Extractor):
                 model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
             else:
                 model = os.environ.get("ANTHROPIC_MODEL", ANTHROPIC_MODEL)
+        if min_call_interval_s is None:
+            # Gemini free tier is 10 RPM — sleep 6.5s between calls to stay under.
+            # Anthropic has its own rate-limit handling and a higher cap; no throttle.
+            min_call_interval_s = 6.5 if provider == "gemini" else 0.0
         self.provider = provider
         self.model = model
         self.max_retries = max_retries
         self.retry_base_delay = retry_base_delay
+        self.min_call_interval_s = min_call_interval_s
+        self._last_call_time = 0.0
         self._client: Anthropic | None = None
 
     @property
@@ -263,18 +270,38 @@ class LLMExtractor(Extractor):
         self, user_prompt: str, kpi_key: str, system_prompt: str = _SYSTEM_PROMPT,
     ) -> dict | None:
         for attempt in range(self.max_retries):
+            self._throttle_if_needed()
             try:
                 if self.provider == "anthropic":
-                    return self._call_anthropic_once(user_prompt, kpi_key, system_prompt)
-                if self.provider == "gemini":
-                    return self._call_gemini_once(user_prompt, kpi_key, system_prompt)
-                raise ValueError(f"Unsupported provider {self.provider!r}")
+                    result = self._call_anthropic_once(user_prompt, kpi_key, system_prompt)
+                elif self.provider == "gemini":
+                    result = self._call_gemini_once(user_prompt, kpi_key, system_prompt)
+                else:
+                    raise ValueError(f"Unsupported provider {self.provider!r}")
+                self._last_call_time = time.time()
+                return result
             except Exception as e:
+                self._last_call_time = time.time()
                 log.warning("LLM call failed (attempt %d/%d): %s",
                             attempt + 1, self.max_retries, e)
+                # On 429 rate-limit errors, the per-minute window is the only
+                # recovery — back off long enough to clear it.
                 if attempt < self.max_retries - 1:
-                    time.sleep(self.retry_base_delay * (2 ** attempt))
+                    err_str = str(e)
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        time.sleep(60.0)
+                    else:
+                        time.sleep(self.retry_base_delay * (2 ** attempt))
         return None
+
+    def _throttle_if_needed(self) -> None:
+        """Sleep so that successive calls are ≥ min_call_interval_s apart."""
+        if self.min_call_interval_s <= 0 or self._last_call_time == 0.0:
+            return
+        elapsed = time.time() - self._last_call_time
+        wait = self.min_call_interval_s - elapsed
+        if wait > 0:
+            time.sleep(wait)
 
     def _call_anthropic_once(
         self, user_prompt: str, kpi_key: str, system_prompt: str

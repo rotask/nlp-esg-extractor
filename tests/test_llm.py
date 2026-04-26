@@ -257,6 +257,65 @@ def test_gemini_provider_handles_no_function_call():
     assert result is None
 
 
+def test_gemini_throttles_between_consecutive_calls(monkeypatch):
+    """Two consecutive Gemini calls should sleep at least min_call_interval_s
+    apart to stay under the 10 RPM free-tier rate limit."""
+    from unittest.mock import MagicMock, patch
+    from nlp_esg.extractors import llm as llm_mod
+
+    fake_call = MagicMock()
+    fake_call.name = "record_kpi"
+    fake_call.args = {"value": 1, "unit": "tCO2e", "reporting_year": 2024,
+                       "source_snippet": "x", "confidence": 0.9}
+    response = MagicMock(candidates=[MagicMock(content=MagicMock(
+        parts=[MagicMock(function_call=fake_call)]))])
+    fake_client = MagicMock()
+    fake_client.models.generate_content.return_value = response
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(llm_mod.time, "sleep", lambda s: sleeps.append(s))
+
+    with patch("nlp_esg.extractors.llm._gemini_client", return_value=fake_client):
+        ext = llm_mod.LLMExtractor(
+            provider="gemini", model="gemini-2.5-flash-lite",
+            min_call_interval_s=6.5,
+        )
+        ext._call_with_retry("p1", "scope_1_emissions", "sys")
+        ext._call_with_retry("p2", "scope_1_emissions", "sys")
+
+    # Between two successive successful calls the throttle should have slept ≈ 6.5s
+    assert any(s >= 6.0 for s in sleeps), f"no throttle sleep observed (sleeps={sleeps})"
+
+
+def test_anthropic_does_not_throttle(monkeypatch):
+    """Anthropic provider has its own rate-limit handling; no inter-call sleep."""
+    from unittest.mock import MagicMock, patch
+    from nlp_esg.extractors.llm import LLMExtractor
+
+    block = MagicMock()
+    block.type = "tool_use"
+    block.name = "record_kpi"
+    block.input = {"value": 1, "unit": "tCO2e", "reporting_year": 2024,
+                    "source_snippet": "x", "confidence": 0.9}
+    response = MagicMock(content=[block])
+
+    sleeps: list[float] = []
+    import nlp_esg.extractors.llm as llm_mod
+    monkeypatch.setattr(llm_mod.time, "sleep", lambda s: sleeps.append(s))
+
+    with patch("nlp_esg.extractors.llm.Anthropic") as mock_cls:
+        client = MagicMock()
+        client.messages.create.return_value = response
+        mock_cls.return_value = client
+        # No min_call_interval_s passed — Anthropic default is 0 (no throttle).
+        ext = LLMExtractor(provider="anthropic")
+        ext._call_with_retry("p1", "scope_1_emissions", "sys")
+        ext._call_with_retry("p2", "scope_1_emissions", "sys")
+
+    # Anthropic with default settings should not have triggered the throttle
+    assert all(s < 6.0 for s in sleeps), f"Anthropic should not throttle (sleeps={sleeps})"
+
+
 def test_gemini_provider_retries_on_exception():
     """Gemini call failures retry up to max_retries with backoff."""
     from unittest.mock import MagicMock, patch
