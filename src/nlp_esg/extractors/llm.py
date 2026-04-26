@@ -11,7 +11,7 @@ from anthropic import Anthropic
 from nlp_esg.config import ANTHROPIC_MODEL, CACHE_DIR, KPIS
 from nlp_esg.extractors.base import Extractor
 from nlp_esg.normalize import canonicalize_unit, normalize_co2, to_canonical_value
-from nlp_esg.retrieval import cosine_sim, embed_texts
+from nlp_esg.retrieval import embed_texts, rank_pages_cosine
 from nlp_esg.types import KPIExtraction
 
 log = logging.getLogger(__name__)
@@ -88,32 +88,8 @@ class LLMExtractor(Extractor):
         sentences or normalized table rows.
         """
         query_emb = embed_texts([kpi_query])[0]
-
-        page_max_sim: dict[int, float] = {}
-        for s in report["sentences"]:
-            sim = cosine_sim(query_emb, s["embedding"])
-            pn = s["page_num"]
-            if sim > page_max_sim.get(pn, -1.0):
-                page_max_sim[pn] = sim
-        for th in report["table_headers"]:
-            sim = cosine_sim(query_emb, th["embedding"])
-            pn = report["tables"][th["table_idx"]]["page_num"]
-            if sim > page_max_sim.get(pn, -1.0):
-                page_max_sim[pn] = sim
-
-        # Boost pages whose normalised text contains a KPI unit token.
-        # Very high similarity is bunched in dense ESG datasheets, so a small
-        # +0.1 unit-presence bonus reliably surfaces the data page.
-        unit_tokens = [u.lower() for u in (kpi_unit_family or [])]
-        boosted: list[tuple[int, float]] = []
-        for p in report["pages"]:
-            base = page_max_sim.get(p["page_num"], 0.0)
-            text_l = normalize_co2(p["text"]).lower()
-            bonus = 0.1 if any(u in text_l for u in unit_tokens) else 0.0
-            boosted.append((p["page_num"], base + bonus))
-
-        boosted.sort(key=lambda x: x[1], reverse=True)
-        top_pages = boosted[:12]
+        ranked = rank_pages_cosine(report, query_emb, unit_tokens=kpi_unit_family)
+        top_pages = ranked[:12]
         top_page_nums = {pn for pn, _ in top_pages}
 
         pages_by_num = {p["page_num"]: p for p in report["pages"]}

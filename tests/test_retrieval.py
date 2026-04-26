@@ -35,3 +35,49 @@ def test_top_k_handles_k_greater_than_corpus():
     query = np.array([1.0, 0.0])
     corpus = np.array([[1.0, 0.0], [0.0, 1.0]])
     assert top_k(query, corpus, k=10) == [0, 1]
+
+
+def _ix(*, pages, sentences, table_headers, tables):
+    return {
+        "company": "x", "report_year": 2024, "parser": "pdfplumber",
+        "pages": pages, "sentences": sentences,
+        "table_headers": table_headers, "tables": tables,
+    }
+
+
+def test_rank_pages_cosine_returns_pages_sorted_by_max_sim():
+    from nlp_esg.retrieval import rank_pages_cosine
+    q = np.array([1.0, 0.0], dtype=np.float32)
+    e_high = np.array([1.0, 0.0], dtype=np.float32)
+    e_low = np.array([0.0, 1.0], dtype=np.float32)
+    indexed = _ix(
+        pages=[{"page_num": 1, "text": "a"}, {"page_num": 2, "text": "b"}],
+        sentences=[
+            {"page_num": 1, "text": "low", "embedding": e_low},
+            {"page_num": 2, "text": "high", "embedding": e_high},
+        ],
+        table_headers=[],
+        tables=[],
+    )
+    ranked = rank_pages_cosine(indexed, q)
+    assert ranked[0][0] == 2
+    assert ranked[1][0] == 1
+
+
+def test_rank_pages_cosine_unit_presence_boost():
+    from nlp_esg.retrieval import rank_pages_cosine
+    q = np.array([1.0, 0.0], dtype=np.float32)
+    e_mid = np.array([0.5, 0.5], dtype=np.float32)
+    indexed = _ix(
+        pages=[
+            {"page_num": 1, "text": "narrative no unit"},
+            {"page_num": 2, "text": "data with MtCO2e marker"},
+        ],
+        sentences=[
+            {"page_num": 1, "text": "x", "embedding": e_mid},
+            {"page_num": 2, "text": "y", "embedding": e_mid},
+        ],
+        table_headers=[], tables=[],
+    )
+    ranked = rank_pages_cosine(indexed, q, unit_tokens=["mtco2e"])
+    assert ranked[0][0] == 2  # boosted page wins despite same cosine

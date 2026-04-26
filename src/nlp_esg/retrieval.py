@@ -127,3 +127,39 @@ def build_index(report: ParsedReport, model_name: str | None = None) -> IndexedR
         "sentences": sentences,
         "table_headers": table_headers,
     }
+
+
+def rank_pages_cosine(
+    report: IndexedReport,
+    query_emb: np.ndarray,
+    unit_tokens: list[str] | None = None,
+) -> list[tuple[int, float]]:
+    """Score each page by max sentence/table-header cosine sim to query.
+
+    Optional small unit-presence bonus (+0.1) for pages whose normalised text
+    contains a KPI unit token. Returns [(page_num, score)] sorted descending.
+    """
+    page_max: dict[int, float] = {}
+    for s in report["sentences"]:
+        sim = cosine_sim(query_emb, s["embedding"])
+        pn = s["page_num"]
+        if sim > page_max.get(pn, -1.0):
+            page_max[pn] = sim
+    for th in report["table_headers"]:
+        sim = cosine_sim(query_emb, th["embedding"])
+        pn = report["tables"][th["table_idx"]]["page_num"]
+        if sim > page_max.get(pn, -1.0):
+            page_max[pn] = sim
+
+    tokens = [u.lower() for u in (unit_tokens or [])]
+    scored: list[tuple[int, float]] = []
+    for p in report["pages"]:
+        base = page_max.get(p["page_num"], 0.0)
+        bonus = 0.0
+        if tokens:
+            text_l = normalize_co2(p["text"]).lower()
+            if any(u in text_l for u in tokens):
+                bonus = 0.1
+        scored.append((p["page_num"], base + bonus))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored
