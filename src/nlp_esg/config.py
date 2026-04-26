@@ -27,6 +27,9 @@ KPIS: dict[str, dict] = {
         "unit_family": ["tCO2e", "ktCO2e", "MtCO2e", "t CO2-eq", "t CO2e", "tonnes CO2e"],
         "canonical_unit": "tCO2e",
         "plausible_range": (1e2, 1e9),
+        # Lines containing any of these tokens are rejected by the line-scanning
+        # fallback — they identify metrics that are NOT total scope 1.
+        "negative_tokens": ["scope 2", "scope 3", "methane", "intensity", "per "],
     },
     "total_energy_consumption": {
         "query": "Total energy consumption",
@@ -38,6 +41,7 @@ KPIS: dict[str, dict] = {
         "unit_family": ["MWh", "GWh", "TWh", "GJ", "TJ", "PJ", "kWh"],
         "canonical_unit": "MWh",
         "plausible_range": (1e2, 1e9),
+        "negative_tokens": ["renewable", "produced", "production", "intensity", "per "],
     },
     "water_consumption": {
         "query": "Total water consumption withdrawal",
@@ -49,6 +53,7 @@ KPIS: dict[str, dict] = {
         "unit_family": ["m3", "m³", "ML", "megaliters", "megalitres", "kL", "thousand m3", "cubic metres"],
         "canonical_unit": "m3",
         "plausible_range": (1e1, 1e10),
+        "negative_tokens": ["withdrawal", "withdrawn", "abstracted", "discharge", "discharged", "intake", "recycled", "reclaimed"],
     },
 }
 

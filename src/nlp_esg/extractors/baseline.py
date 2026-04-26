@@ -14,7 +14,7 @@ from nlp_esg.normalize import (
     parse_value,
     to_canonical_value,
 )
-from nlp_esg.retrieval import cosine_sim, embed_texts, top_k
+from nlp_esg.retrieval import cosine_sim, embed_texts, rank_pages_hybrid, top_k
 from nlp_esg.types import KPIExtraction
 
 log = logging.getLogger(__name__)
@@ -241,53 +241,96 @@ class BaselineExtractor(Extractor):
         if best_table_result is not None:
             return best_table_result[1]
 
-        # --- Sentence fallback ---
-        if not report["sentences"]:
-            return KPIExtraction(
-                company=report["company"], report_year=report["report_year"],
-                kpi=kpi_key, value=None, unit=None, reporting_year=None,
-                source_snippet=None, source_page=None, confidence=None,
-                extractor=self.name, flags=flags,
-            )
+        # --- Page-level line-scanning fallback ---
+        # The original sentence fallback failed because ESG data lines almost
+        # never end in punctuation — the regex sentence splitter mangled them.
+        # We instead rank pages with the hybrid BM25 + RRF ranker, then scan
+        # each top page line by line for a (label-keyword, value, unit) hit.
+        line_result = self._scan_lines_for_kpi(
+            report, kpi, kpi_key, unit_family_canonicals, flags
+        )
+        if line_result is not None:
+            return line_result
 
-        sent_embs = np.stack([s["embedding"] for s in report["sentences"]])
-        top_idxs = top_k(query_emb, sent_embs, k=TOP_K_SENTENCES)
+        return KPIExtraction(
+            company=report["company"], report_year=report["report_year"],
+            kpi=kpi_key, value=None, unit=None, reporting_year=None,
+            source_snippet=None, source_page=None, confidence=None,
+            extractor=self.name, flags=flags,
+        )
+
+    def _scan_lines_for_kpi(
+        self,
+        report: Any,
+        kpi: dict,
+        kpi_key: str,
+        unit_family_canonicals: set[str],
+        flags: list[str],
+        top_n_pages: int = 8,
+        min_kw_score: float = 0.15,
+    ) -> KPIExtraction | None:
+        """Page-level line scanner.
+
+        Returns the highest-scoring (line, value, unit) match across the top-N
+        ranked pages, or None if nothing passes the filters.
+        """
+        queries = list(kpi.get("queries") or [kpi["query"]])
+        ranked = rank_pages_hybrid(report, queries)
+        top_pages = [pn for pn, _ in ranked[:top_n_pages]]
+        pages_by_num = {p["page_num"]: p for p in report["pages"]}
+
+        # KPI relevance vocabulary: keywords from the query strings, length > 3.
+        kpi_tokens: set[str] = set()
+        for q in queries:
+            for tok in re.findall(r"[A-Za-z]+", q.lower()):
+                if len(tok) > 3:
+                    kpi_tokens.add(tok)
+
+        negative_tokens = [t.lower() for t in kpi.get("negative_tokens", [])]
+        lo, hi = kpi["plausible_range"]
 
         best: tuple[float, float, str, str, int] | None = None
-        for idx in top_idxs:
-            s = report["sentences"][idx]
-            sim = cosine_sim(query_emb, s["embedding"])
-            pv = parse_value(s["text"], kpi_unit_family=kpi["unit_family"])
-            if pv is None:
+        for pn in top_pages:
+            page = pages_by_num.get(pn)
+            if page is None:
                 continue
-            raw_value, unit = pv
-            if unit not in unit_family_canonicals:
-                continue
-            try:
-                canonical_value = to_canonical_value(
-                    raw_value, unit, kpi["canonical_unit"]
-                )
-            except ValueError:
-                continue
-            lo, hi = kpi["plausible_range"]
-            if not (lo <= canonical_value <= hi):
-                if "out_of_range" not in flags:
-                    flags.append("out_of_range")
-                continue
-            year_bonus = 0.1 if str(report["report_year"]) in s["text"] else 0.0
-            score = sim + year_bonus
-            if best is None or score > best[0]:
-                best = (score, canonical_value, s["text"], unit, s["page_num"])
+            text = normalize_co2(page["text"])
+            for line in text.split("\n"):
+                stripped = line.strip()
+                if len(stripped) < 10:
+                    continue
+                line_lower = stripped.lower()
+                if any(neg in line_lower for neg in negative_tokens):
+                    continue
+                kw_hits = sum(1 for t in kpi_tokens if t in line_lower)
+                if kw_hits == 0:
+                    continue
+                kw_score = kw_hits / max(1, len(kpi_tokens))
+                if kw_score < min_kw_score:
+                    continue
+                pv = parse_value(stripped, kpi_unit_family=kpi["unit_family"])
+                if pv is None:
+                    continue
+                raw_value, unit = pv
+                if unit not in unit_family_canonicals:
+                    continue
+                try:
+                    canonical_value = to_canonical_value(
+                        raw_value, unit, kpi["canonical_unit"]
+                    )
+                except ValueError:
+                    continue
+                if not (lo <= canonical_value <= hi):
+                    if "out_of_range" not in flags:
+                        flags.append("out_of_range")
+                    continue
+                if best is None or kw_score > best[0]:
+                    best = (kw_score, canonical_value, stripped, unit, pn)
 
         if best is None:
-            return KPIExtraction(
-                company=report["company"], report_year=report["report_year"],
-                kpi=kpi_key, value=None, unit=None, reporting_year=None,
-                source_snippet=None, source_page=None, confidence=None,
-                extractor=self.name, flags=flags,
-            )
+            return None
 
-        score, canonical_value, sentence, unit, page = best
+        score, canonical_value, snippet, unit, page = best
         return KPIExtraction(
             company=report["company"],
             report_year=report["report_year"],
@@ -295,7 +338,7 @@ class BaselineExtractor(Extractor):
             value=canonical_value,
             unit=kpi["canonical_unit"],
             reporting_year=report["report_year"],
-            source_snippet=f"sentence@page {page}: {sentence}",
+            source_snippet=f"line@page {page}: {snippet[:160]}",
             source_page=page,
             confidence=float(score),
             extractor=self.name,

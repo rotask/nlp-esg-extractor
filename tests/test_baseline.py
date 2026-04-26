@@ -57,7 +57,8 @@ def test_baseline_sentence_fallback(fake_embed, report_sentence_only):
     assert result.value == pytest.approx(12345.0)
     assert result.unit == "tCO2e"
     assert result.source_page == 7
-    assert "sentence" in (result.source_snippet or "").lower()
+    # Now produced by the page-line scanner, not the legacy sentence splitter.
+    assert "line" in (result.source_snippet or "").lower()
 
 
 def test_baseline_not_reported_when_nothing_matches(fake_embed):
