@@ -1,9 +1,10 @@
 from __future__ import annotations
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from nlp_esg.ingest import ParsedReport, _parse_filename
+if TYPE_CHECKING:
+    from nlp_esg.ingest import ParsedReport
 
 log = logging.getLogger(__name__)
 
@@ -13,8 +14,11 @@ except ImportError:  # pragma: no cover - import-time fallback
     DocumentConverter = None  # type: ignore[assignment]
 
 
-def parse_with_docling(path: Path) -> ParsedReport | None:
+def parse_with_docling(path: Path) -> "ParsedReport | None":
     """Parse a PDF with Docling. Return None on any failure so the caller can fall back."""
+    # Imported lazily to avoid a circular import with nlp_esg.ingest.
+    from nlp_esg.ingest import _parse_filename
+
     if DocumentConverter is None:
         log.warning("docling not installed; caller should fall back")
         return None
@@ -45,6 +49,17 @@ def parse_with_docling(path: Path) -> ParsedReport | None:
         except Exception:
             text = ""
         pages.append({"page_num": page_no, "text": text or ""})
+
+    # Quality check: Docling can OOM mid-document on long PDFs and silently
+    # emit empty pages thereafter. If too many pages are empty/junk, return
+    # None so the caller falls back to pdfplumber for the whole report.
+    substantive = sum(1 for p in pages if len((p["text"] or "").strip()) >= 100)
+    if n_pages > 0 and substantive / n_pages < 0.5:
+        log.warning(
+            "docling produced %d/%d substantive pages for %s — falling back",
+            substantive, n_pages, path.name,
+        )
+        return None
 
     tables = []
     for item, _level in _safe_iterate(doc):

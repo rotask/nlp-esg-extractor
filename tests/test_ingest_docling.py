@@ -17,7 +17,9 @@ def _fake_docling_doc():
 
     doc = MagicMock()
     doc.num_pages.return_value = 3
-    doc.export_to_markdown.side_effect = lambda page_no=None: f"# Page {page_no}\nsome text"
+    doc.export_to_markdown.side_effect = lambda page_no=None: (
+        f"# Page {page_no}\n" + "Substantive paragraph of report content. " * 5
+    )
     doc.iterate_items.return_value = [(table_item, 0)]
     return doc
 
@@ -53,6 +55,29 @@ def test_parse_with_docling_returns_none_on_empty_pages(tmp_path):
     doc = MagicMock()
     doc.num_pages.return_value = 0
     doc.iterate_items.return_value = []
+    converter = MagicMock()
+    converter.convert.return_value = MagicMock(document=doc)
+    with patch("nlp_esg.ingest_docling.DocumentConverter", return_value=converter):
+        report = parse_with_docling(pdf)
+    assert report is None
+
+
+def test_parse_with_docling_returns_none_when_majority_pages_empty(tmp_path):
+    """If Docling OOMs partway through, most pages come back empty.
+    The quality check should reject the result so the caller falls back."""
+    pdf = tmp_path / "oom_2024.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+
+    doc = MagicMock()
+    doc.num_pages.return_value = 100
+    doc.iterate_items.return_value = []
+    # First 28 pages succeed; pages 29-100 return empty (the OOM pattern).
+    def export(page_no=None):
+        if page_no is not None and page_no <= 28:
+            return "Substantial paragraph of report content " * 20
+        return ""
+    doc.export_to_markdown.side_effect = export
+
     converter = MagicMock()
     converter.convert.return_value = MagicMock(document=doc)
     with patch("nlp_esg.ingest_docling.DocumentConverter", return_value=converter):
