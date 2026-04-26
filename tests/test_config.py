@@ -37,3 +37,17 @@ def test_kpi_extraction_not_reported_is_allowed():
         extractor="baseline", flags=[],
     )
     assert x.value is None
+
+
+def test_every_kpi_has_queries_list():
+    for kpi_key in KPI_KEYS:
+        kpi = KPIS[kpi_key]
+        assert "queries" in kpi, f"{kpi_key} missing 'queries'"
+        assert isinstance(kpi["queries"], list)
+        assert len(kpi["queries"]) >= 2, f"{kpi_key} needs at least 2 queries"
+        assert all(isinstance(q, str) and q.strip() for q in kpi["queries"])
+
+
+def test_single_query_field_still_present():
+    for kpi_key in KPI_KEYS:
+        assert "query" in KPIS[kpi_key]

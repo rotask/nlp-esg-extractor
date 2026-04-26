@@ -18,18 +18,33 @@ TOP_K_SENTENCES = 5
 KPIS: dict[str, dict] = {
     "scope_1_emissions": {
         "query": "Scope 1 direct greenhouse gas emissions",
+        "queries": [
+            "Total gross Scope 1 GHG emissions",
+            "Scope 1 direct greenhouse gas emissions tCO2e",
+            "Scope 1 (direct) emissions",
+        ],
         "unit_family": ["tCO2e", "ktCO2e", "MtCO2e", "t CO2-eq", "t CO2e", "tonnes CO2e"],
         "canonical_unit": "tCO2e",
         "plausible_range": (1e2, 1e9),
     },
     "total_energy_consumption": {
         "query": "Total energy consumption",
+        "queries": [
+            "Total energy consumption MWh",
+            "Energy consumption GWh",
+            "Total energy consumed across operations",
+        ],
         "unit_family": ["MWh", "GWh", "TWh", "GJ", "TJ", "PJ", "kWh"],
         "canonical_unit": "MWh",
         "plausible_range": (1e2, 1e9),
     },
     "water_consumption": {
         "query": "Total water consumption withdrawal",
+        "queries": [
+            "Total freshwater consumption million m3",
+            "Water consumption m3",
+            "Total water consumed",
+        ],
         "unit_family": ["m3", "m³", "ML", "megaliters", "megalitres", "kL", "thousand m3", "cubic metres"],
         "canonical_unit": "m3",
         "plausible_range": (1e1, 1e10),
