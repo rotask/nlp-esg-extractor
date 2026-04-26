@@ -387,3 +387,168 @@ page text and pick the right number. The baseline survives in the
 final pipeline as a comparison/diagnostic — not because it works,
 but because its failure modes illustrate exactly why the LLM path is
 needed.
+
+---
+
+## 5. Iteration 2 (2026-04-26)
+
+Implementation plan: `docs/superpowers/plans/2026-04-26-nlp-esg-iteration2.md`.
+Design: `docs/superpowers/specs/2026-04-26-nlp-esg-iteration2-design.md`.
+
+### 5.1 What changed
+
+Eight code commits (Tasks 1–14) implemented the design:
+
+1. `parser` field on `ParsedReport`, `run_tag` on `KPIExtraction` —
+   foundation for multi-parser dispatch and run-tagged persistence.
+2. Per-KPI `queries: list[str]` in the registry — three reporting
+   phrasings per KPI taken from observed report wording.
+3. `_CO2_LONE_SUBSCRIPT` regex covering the BP "MtCOe ... \n2 \n"
+   pattern (§3.5).
+4. `_parse_with_pdfplumber` lifted into a private helper.
+5. `ingest_docling.parse_with_docling` + dispatcher in
+   `parse_pdf` — Docling first, pdfplumber fallback.
+6. `rank_pages_cosine` lifted out of `LLMExtractor` into
+   `retrieval.py`.
+7. `rank_pages_rrf` (multi-query reciprocal-rank fusion).
+8. `rank_pages_hybrid` (RRF + BM25 hybrid, both min-max
+   normalised, α = 0.5).
+9. `LLMExtractor._build_context` switched to multi-query hybrid
+   retrieval.
+10. `build_index` table-header embedding now includes the first
+    five row labels — addresses Eni-style tables where row[0]
+    carries the KPI semantics.
+11. **System prompt added to the LLM cache key.** This is the
+    load-bearing fix: the v1 cache key was
+    `(model, kpi, user_prompt)`, so the prompt-v2 work prepared
+    in §2.6 silently served v1 responses. The new key is
+    `(model, kpi, system_prompt, user_prompt)`.
+12. `--run-tag` CLI flag, `data/runs/<tag>/extractions.csv`
+    persistence, `build_run_comparison` helper.
+
+Two follow-up commits adapted to environmental constraints:
+
+- File-size guard: skip Docling for PDFs above 15 MB.
+- `NLP_ESG_DISABLE_DOCLING=1` env var to disable Docling entirely.
+
+### 5.2 What worked
+
+**Baseline now extracts BP `total_energy_consumption` correctly: 134,448,000 MWh (gold = 134.4 M MWh).** Iteration 1 baseline missed every cell (0/15). The lift came from three changes acting together:
+
+- `_CO2_LONE_SUBSCRIPT` and the existing CO₂ patterns made the BP
+  page parseable instead of garbled.
+- The hybrid BM25 + RRF page ranker surfaced the right BP page.
+  ClimateBERT cosine similarity put the data page in a tight
+  cluster around 0.94–0.97 with narrative pages; BM25 picked it
+  out by rewarding the exact "MWh" / "134,448" tokens.
+- Multi-query retrieval (three phrasings instead of one) added
+  enough rank-diversity to keep the data page in the top 12.
+
+**The architecture works end-to-end**: Docling-first dispatch with
+pdfplumber fallback, run-tagged extraction persistence, multi-run
+comparison join, and the LLM-cache-key fix all landed and are
+covered by 99 passing tests.
+
+### 5.3 What did not work
+
+**Docling crashed.** The C++ layout model has a memory bug that
+manifests as `std::bad_alloc` past ~28 pages on long PDFs and
+escalates to a process-killing `SIGSEGV` on Eni (12 MB) — exit code
+139, no Python-level fallback possible.
+
+Mitigation path was three commits deep:
+
+1. Add a quality-check fallback: if more than 50 % of pages come
+   back empty after Docling parse, return `None` so the dispatcher
+   falls back. Catches the OOM-but-still-returns-something case.
+2. File-size guard: skip Docling up-front for files above 15 MB so
+   we don't burn 5–10 minutes per file before the quality check
+   fires (caught Enel 42 MB and Shell 21 MB).
+3. After confirming the segfault still hit on Eni at 12 MB despite
+   the size guard, the `NLP_ESG_DISABLE_DOCLING=1` env var was
+   added and the v2 run completed with pdfplumber for all 5 PDFs.
+
+The Docling code path remains in the codebase for environments
+where the layout model behaves; on this corpus + machine the
+fallback is the only working configuration.
+
+**LLM credits exhausted.** Every v2 LLM call returned a 400
+`invalid_request_error` ("credit balance is too low"). Every v2 LLM
+extraction is `value=None, flags=["api_error"]`. The 8/15 LLM result
+from iteration 1 stands as the LLM benchmark; the v2 LLM numbers
+in the table below are 0/15 strictly because the API never returned
+a non-error response, not because the prompt or retrieval changes
+regressed quality.
+
+### 5.4 Headline numbers vs gold
+
+| Run | Extractor | KPI | TP | FP | FN | Precision | Recall | F1 | Note |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| v1 | baseline | scope_1 | 0 | 0 | 5 | 0.00 | 0.00 | 0.00 | |
+| v1 | baseline | total_energy | 0 | 1 | 4 | 0.00 | 0.00 | 0.00 | |
+| v1 | baseline | water | 0 | 0 | 5 | 0.00 | 0.00 | 0.00 | |
+| **v2** | **baseline** | **scope_1** | **0** | **0** | **5** | **0.00** | **0.00** | **0.00** | unchanged |
+| **v2** | **baseline** | **total_energy** | **1** | **1** | **3** | **0.50** | **0.25** | **0.33** | **+1 TP (BP)** |
+| **v2** | **baseline** | **water** | **0** | **0** | **5** | **0.00** | **0.00** | **0.00** | unchanged |
+| v1 | llm | scope_1 | 3 | 0 | 2 | 1.00 | 0.60 | 0.75 | cached, blocked from re-run |
+| v1 | llm | total_energy | 4 | 1 | 0 | 0.80 | 1.00 | 0.89 | cached, blocked from re-run |
+| v1 | llm | water | 1 | 1 | 3 | 0.50 | 0.25 | 0.33 | cached, blocked from re-run |
+| v2 | llm | scope_1 | 0 | 0 | 5 | 0.00 | 0.00 | 0.00 | API errored on every cell |
+| v2 | llm | total_energy | 0 | 0 | 5 | 0.00 | 0.00 | 0.00 | API errored on every cell |
+| v2 | llm | water | 0 | 0 | 5 | 0.00 | 0.00 | 0.00 | API errored on every cell |
+
+Aggregate baseline: 0/15 → **1/15** TP. Aggregate LLM (v1 cached):
+**8/15** TP, unchanged.
+
+Per-cell v2 baseline detail:
+
+| Company | KPI | v2 baseline value | Verdict |
+| --- | --- | --- | --- |
+| BP | total_energy | 134,448,000 MWh | ✅ matches gold (134.4 M MWh) |
+| Iberdrola | total_energy | 88,190,000 MWh | ❌ FP (renewable production, not consumption — same row picked in v1) |
+| All other (company × KPI) | — | None | not extracted |
+
+### 5.5 Pipeline state on disk
+
+- `data/runs/v2_no_docling/extractions.csv` — 30 rows
+  (5 reports × 3 KPIs × 2 extractors). LLM rows have
+  `flags=['api_error']`.
+- `data/runs/v2_no_docling/metrics.csv` — the table above (machine-readable).
+- `data/cache/{company}_{year}_pdfplumber.pkl` — fresh v2 caches.
+- `data/cache/llm/*.json` — five v1 cached responses preserved
+  but not consulted by v2 (different cache keys).
+
+### 5.6 What remains for v2 LLM evaluation
+
+When credits are restored, re-running the pipeline should produce
+~11–13/15 LLM TPs based on the rule-by-rule analysis in §2.6:
+
+- **Bucket 1 (water consumption)**: BP / Eni / Iberdrola water
+  cells should flip green or to honest-null on the new
+  withdrawal-vs-consumption rule.
+- **Bucket 2 (ESRS aggregation)**: Shell scope_1 should flip from
+  46 → 69 ESRS-aligned. Eni scope_1 may stay null if no
+  consolidated total exists.
+- **Bucket 3 (magnitude prefixes)**: Shell water and Shell
+  total_energy should flip green on the multiply-out-magnitude
+  rule.
+
+Re-run command (one line, no code change needed):
+
+```
+NLP_ESG_DISABLE_DOCLING=1 python -m nlp_esg.pipeline --run-tag v2_llm
+```
+
+The cache-key fix guarantees these will be fresh API calls under
+prompt v2 — the iteration-1 cached responses will not silently be
+served.
+
+### 5.7 Headline takeaway for this iteration
+
+The retrieval and normalisation work landed and demonstrably
+unlocked the first baseline TP this corpus has ever produced. The
+LLM-side improvements are wired and tested but unobservable in this
+run because of the API credit constraint; the cache-key fix means
+the v1 cached responses will not contaminate the v2 evaluation
+when credits return. Docling did not work on this corpus + machine
+and is now opt-in via env var rather than load-bearing.
