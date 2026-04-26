@@ -9,6 +9,7 @@ from nlp_esg.extractors.base import Extractor
 from nlp_esg.normalize import (
     _NUMBER_RE,
     canonicalize_unit,
+    normalize_co2,
     parse_number,
     parse_value,
     to_canonical_value,
@@ -29,17 +30,51 @@ def _structural_score(headers: list[str], report_year: int) -> float:
 
 
 def _find_year_col(headers: list[str], report_year: int) -> int | None:
-    best = None
+    """Return the column index of the MOST RECENT year found in headers.
+
+    ESG reports typically show the current reporting year as the leftmost data
+    column.  Using the most-recent year rather than trying to match report_year
+    (derived from the filename) avoids mismatches when a "2024"-named file
+    actually covers fiscal year 2025.
+    """
+    best: tuple[int, int] | None = None
     for i, h in enumerate(headers):
         m = _YEAR_RE.search(h or "")
         if m:
             year = int(m.group(0))
-            if year == report_year:
-                return i
-            # fall back to most recent year found
             if best is None or year > best[1]:
                 best = (i, year)
     return best[0] if best else None
+
+
+def _effective_headers_and_rows(
+    table: dict,
+) -> tuple[list[str], list[list[str]]]:
+    """Return (headers, rows), promoting row-0 to headers when no year is found
+    in the nominal table headers (pdfplumber sometimes places year labels there)."""
+    headers = table["headers"]
+    rows = table["rows"]
+    if not any(_YEAR_RE.search(h or "") for h in headers):
+        if rows and any(_YEAR_RE.search(c or "") for c in rows[0]):
+            return list(rows[0]), rows[1:]
+    return headers, rows
+
+
+def _row_score(query: str, query_tokens: set[str], row_label: str) -> float:
+    """Score how well a table row label matches the KPI query.
+
+    Prefers rows where the normalised query phrase appears verbatim.
+    Falls back to token-overlap when no phrase match is found.
+    """
+    label_lower = row_label.lower()
+    query_lower = query.lower()
+    if query_lower in label_lower:
+        return 1.0
+    label_tokens = set(label_lower.split())
+    overlap = len(query_tokens & label_tokens)
+    if overlap == len(query_tokens):
+        return 0.8
+    return overlap / max(1, len(query_tokens)) * 0.6
 
 
 def _infer_unit_from_row_or_header(
@@ -64,7 +99,7 @@ def _infer_unit_from_row_or_header(
 
     # 3. Check the value column's own header (e.g., "2024 (tCO2e)")
     if value_col < len(headers):
-        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", headers[value_col] or ""):
+        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", normalize_co2(headers[value_col] or "")):
             try:
                 u = canonicalize_unit(token)
             except ValueError:
@@ -74,13 +109,24 @@ def _infer_unit_from_row_or_header(
 
     # 4. Check the KPI-row header (first cell) for a unit
     if row:
-        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", row[0] or ""):
+        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", normalize_co2(row[0] or "")):
             try:
                 u = canonicalize_unit(token)
             except ValueError:
                 continue
             if u in unit_family_canonicals:
                 return u
+
+    # 5. Check the table-level headers for a unit annotation
+    for h in headers:
+        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", normalize_co2(h or "")):
+            try:
+                u = canonicalize_unit(token)
+            except ValueError:
+                continue
+            if u in unit_family_canonicals:
+                return u
+
     return None
 
 
@@ -98,42 +144,49 @@ class BaselineExtractor(Extractor):
                 continue
 
         query_emb = embed_texts([kpi["query"]])[0]
+        query_tokens = set(kpi["query"].lower().split())
 
         # --- Table-first search ---
+        # Collect all candidates above threshold, score each, keep the best
+        # extraction across the entire candidate set (rather than returning on
+        # the first successful extraction, which may pick a less specific row).
         table_candidates: list[tuple[float, dict, int, list[str]]] = []
         for th in report["table_headers"]:
             sim = cosine_sim(query_emb, th["embedding"])
             if sim < TAU_TABLE:
                 continue
             table = report["tables"][th["table_idx"]]
-            score = sim * _structural_score(table["headers"], report["report_year"])
-            table_candidates.append((score, table, th["table_idx"], table["headers"]))
+            eff_headers, _ = _effective_headers_and_rows(table)
+            score = sim * _structural_score(eff_headers, report["report_year"])
+            table_candidates.append((score, table, th["table_idx"], eff_headers))
 
         table_candidates.sort(key=lambda x: x[0], reverse=True)
 
-        for score, table, _, headers in table_candidates:
+        best_table_result: tuple[float, KPIExtraction] | None = None
+
+        for table_sim, table, _, _ in table_candidates:
+            headers, rows = _effective_headers_and_rows(table)
             year_col = _find_year_col(headers, report["report_year"])
             if year_col is None:
                 continue
-            # Find the KPI row: row whose first cell semantically contains the KPI
-            query_tokens = set(kpi["query"].lower().split())
+
             best_row_idx = None
-            best_overlap = 0
-            for ri, row in enumerate(table["rows"]):
+            best_row_score = 0.0
+            for ri, row in enumerate(rows):
                 if not row:
                     continue
-                row_tokens = set((row[0] or "").lower().split())
-                overlap = len(query_tokens & row_tokens)
-                if overlap > best_overlap:
-                    best_overlap = overlap
+                rs = _row_score(kpi["query"], query_tokens, row[0] or "")
+                if rs > best_row_score:
+                    best_row_score = rs
                     best_row_idx = ri
-            if best_row_idx is None:
+
+            if best_row_idx is None or best_row_score == 0.0:
                 continue
-            row = table["rows"][best_row_idx]
+
+            row = rows[best_row_idx]
             if year_col >= len(row):
                 continue
             cell = row[year_col]
-            # Extract the number (strip any unit embedded in the cell)
             num_match = re.search(_NUMBER_RE, cell)
             if not num_match:
                 continue
@@ -145,9 +198,7 @@ class BaselineExtractor(Extractor):
             unit = _infer_unit_from_row_or_header(
                 headers, row, year_col, unit_family_canonicals
             )
-            if unit is None:
-                continue
-            if unit not in unit_family_canonicals:
+            if unit is None or unit not in unit_family_canonicals:
                 continue
 
             try:
@@ -159,18 +210,19 @@ class BaselineExtractor(Extractor):
 
             lo, hi = kpi["plausible_range"]
             if not (lo <= canonical_value <= hi):
-                flags.append("out_of_range")
-                log.debug("baseline: table candidate rejected out_of_range (kpi=%s, value=%s)", kpi_key, canonical_value)
+                log.debug(
+                    "baseline: table candidate rejected out_of_range (kpi=%s, value=%s)",
+                    kpi_key, canonical_value,
+                )
                 continue
 
-            # Guard: a raw cell that is literally a 4-digit year is suspicious
-            # even when it nominally lies in the plausible range. Flag it so
-            # downstream review can distinguish "we extracted a value" from
-            # "we extracted the year-column header copied into the cell".
+            candidate_flags = list(flags)
+            combined_score = table_sim * best_row_score
             if _YEAR_RE.fullmatch(cell.strip()):
-                flags.append("year_shaped_value")
+                candidate_flags.append("year_shaped_value")
+                combined_score *= 0.5
 
-            return KPIExtraction(
+            candidate = KPIExtraction(
                 company=report["company"],
                 report_year=report["report_year"],
                 kpi=kpi_key,
@@ -179,10 +231,15 @@ class BaselineExtractor(Extractor):
                 reporting_year=report["report_year"],
                 source_snippet=f"table@page {table['page_num']}: {row[0]} | {cell}",
                 source_page=table["page_num"],
-                confidence=float(score),
+                confidence=combined_score,
                 extractor=self.name,
-                flags=flags,
+                flags=candidate_flags,
             )
+            if best_table_result is None or combined_score > best_table_result[0]:
+                best_table_result = (combined_score, candidate)
+
+        if best_table_result is not None:
+            return best_table_result[1]
 
         # --- Sentence fallback ---
         if not report["sentences"]:

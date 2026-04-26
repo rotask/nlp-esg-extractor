@@ -10,7 +10,8 @@ from anthropic import Anthropic
 
 from nlp_esg.config import ANTHROPIC_MODEL, CACHE_DIR, KPIS
 from nlp_esg.extractors.base import Extractor
-from nlp_esg.normalize import canonicalize_unit, to_canonical_value
+from nlp_esg.normalize import canonicalize_unit, normalize_co2, to_canonical_value
+from nlp_esg.retrieval import cosine_sim, embed_texts
 from nlp_esg.types import KPIExtraction
 
 log = logging.getLogger(__name__)
@@ -36,17 +37,22 @@ _SYSTEM_PROMPT = """You are an information-extraction assistant for ESG sustaina
 You will be given:
 - A KPI to extract.
 - The list of acceptable units for that KPI.
-- A passage of text from a corporate sustainability report.
+- Passages of text from a corporate sustainability report.
 
-Your job: return the KPI's current-year value by calling the `record_kpi` tool.
+Your job: return the KPI's MOST RECENT year value by calling the `record_kpi` tool.
 
 Rules:
-- Return the value in whatever unit the document uses — do not convert.
-- The unit MUST be one of the acceptable units listed.
-- If the KPI is not reported in this passage, call the tool with value=null, unit=null.
-- Never guess or infer from subsidiary breakdowns if there's no consolidated total — use value=null.
-- `reporting_year` is the year the value refers to, not the publication year.
-- `source_snippet` is the exact quoted text supporting the value."""
+- If the document shows multiple year columns (e.g. "2021 2022 2023 2024 2025"), pick the LATEST year's value.
+- Pick the CONSOLIDATED / TOTAL group-level value — not a subsidiary, business segment, or sub-component breakdown.
+- Pick the ABSOLUTE total — not an intensity ratio (e.g. tCO2e/$, MWh/€, l/kWh) or a percentage.
+- For Scope 1 emissions: pick "Total gross Scope 1 GHG emissions" / "Scope 1 (direct) greenhouse gas emissions". If the report distinguishes "consolidated" from "operational control + non-consolidated entities" (ESRS-aligned reporting, common in Shell/Eni), pick the LARGER ESRS-aligned figure that includes operated non-consolidated entities, not the consolidated-only sub-total. Never pick Scope 2, Scope 3, methane-only, intensity, or net (Scope 1+2 combined).
+- For total energy consumption: pick the company-wide total energy CONSUMED — not energy produced from renewables, fuel-only, or electricity-only sub-totals. If the report distinguishes "operational control" from "ESRS-aligned + non-consolidated", pick the LARGER ESRS-aligned figure.
+- For water consumption: ONLY pick a value labelled "water CONSUMPTION" or "freshwater CONSUMPTION" or "net water consumption". REJECT every value labelled "withdrawal", "withdrawn", "discharge", "discharged", "recycled", "reclaimed", "reused", "produced water", or "wastewater". This rule is STRICT — when in doubt between consumption and withdrawal, return null.
+- Multiply out magnitude prefixes yourself: if the document says "82.0 million m³" return value=82000000, unit=m3. If it says "32,141 thousand m³" return value=32141000, unit=m3. If it says "168.59 TWh" you may either return value=168.59, unit=TWh OR multiply out — but NEVER write a unit that contains a magnitude word (e.g. never "million m3", "thousand m3", "Mm3", "million cubic metres"). The unit MUST be a single base unit from the listed acceptable units.
+- If the KPI is not reported clearly in this passage, call the tool with value=null, unit=null.
+- Never guess or infer from breakdowns if there is no consolidated total — use value=null.
+- `reporting_year` is the year the value refers to (the most recent column).
+- `source_snippet` is the exact quoted text supporting the value (max 200 chars)."""
 
 
 class LLMExtractor(Extractor):
@@ -69,18 +75,66 @@ class LLMExtractor(Extractor):
             self._client = Anthropic()
         return self._client
 
-    def _build_context(self, report: Any, kpi_query: str) -> str:
-        """Concatenate top table pages + top-k sentences as the LLM context."""
+    def _build_context(
+        self, report: Any, kpi_query: str, kpi_unit_family: list[str] | None = None
+    ) -> str:
+        """Return full page text + tables for top-K pages, ranked by max
+        sentence/table-header cosine similarity, with a small boost for pages
+        whose text contains an accepted unit token.
+
+        Page-level retrieval avoids the brittle splits pdfplumber introduces
+        (subscript artefacts, two-column merges, micro-table fragmentation):
+        the actual KPI value usually lives in the page text, not in clean
+        sentences or normalized table rows.
+        """
+        query_emb = embed_texts([kpi_query])[0]
+
+        page_max_sim: dict[int, float] = {}
+        for s in report["sentences"]:
+            sim = cosine_sim(query_emb, s["embedding"])
+            pn = s["page_num"]
+            if sim > page_max_sim.get(pn, -1.0):
+                page_max_sim[pn] = sim
+        for th in report["table_headers"]:
+            sim = cosine_sim(query_emb, th["embedding"])
+            pn = report["tables"][th["table_idx"]]["page_num"]
+            if sim > page_max_sim.get(pn, -1.0):
+                page_max_sim[pn] = sim
+
+        # Boost pages whose normalised text contains a KPI unit token.
+        # Very high similarity is bunched in dense ESG datasheets, so a small
+        # +0.1 unit-presence bonus reliably surfaces the data page.
+        unit_tokens = [u.lower() for u in (kpi_unit_family or [])]
+        boosted: list[tuple[int, float]] = []
+        for p in report["pages"]:
+            base = page_max_sim.get(p["page_num"], 0.0)
+            text_l = normalize_co2(p["text"]).lower()
+            bonus = 0.1 if any(u in text_l for u in unit_tokens) else 0.0
+            boosted.append((p["page_num"], base + bonus))
+
+        boosted.sort(key=lambda x: x[1], reverse=True)
+        top_pages = boosted[:12]
+        top_page_nums = {pn for pn, _ in top_pages}
+
+        pages_by_num = {p["page_num"]: p for p in report["pages"]}
         parts: list[str] = []
+        for pn, _ in top_pages:
+            page = pages_by_num.get(pn)
+            if page is None:
+                continue
+            parts.append(f"=== Page {pn} ===")
+            parts.append(normalize_co2(page["text"])[:4000])
+            parts.append("")
+
+        # Append any tables on the selected pages (cleaner than text for some).
         for t in report["tables"]:
+            if t["page_num"] not in top_page_nums:
+                continue
             parts.append(f"[Table @ page {t['page_num']}]")
             parts.append(" | ".join(t["headers"]))
             for row in t["rows"]:
                 parts.append(" | ".join(row))
             parts.append("")
-
-        for s in report["sentences"]:
-            parts.append(f"[Page {s['page_num']}] {s['text']}")
 
         return "\n".join(parts)
 
@@ -88,7 +142,7 @@ class LLMExtractor(Extractor):
         kpi = KPIS[kpi_key]
         flags: list[str] = []
 
-        context = self._build_context(report, kpi["query"])
+        context = self._build_context(report, kpi["query"], kpi["unit_family"])
 
         user_prompt = (
             f"KPI to extract: {kpi['query']}\n"
@@ -151,7 +205,7 @@ class LLMExtractor(Extractor):
             kpi=kpi_key,
             value=canonical_value,
             unit=kpi["canonical_unit"],
-            reporting_year=reporting_year,
+            reporting_year=report["report_year"],
             source_snippet=snippet,
             source_page=None,
             confidence=confidence,

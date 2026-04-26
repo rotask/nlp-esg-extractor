@@ -2,6 +2,37 @@ from __future__ import annotations
 import re
 
 
+# ---------------------------------------------------------------------------
+# CO₂ text normalisation
+# PDF renderers often split "CO₂e" into fragments like "CO 2 e", "COe\n2",
+# or "MtCO [numbers]\n2eq" (subscript on a separate line).
+# ---------------------------------------------------------------------------
+_CO2_INLINE = re.compile(r"CO\s+2\s+eq?", re.IGNORECASE)        # "CO 2 e", "CO 2 eq"
+_CO2_SUFFIX_AFTER = re.compile(r"COe\s*q?\s*2", re.IGNORECASE)  # "COe2", "COeq 2"
+# "MtCO [anything on same line] \n 2eq?" — subscript digit on next line
+_CO2_NEXT_LINE = re.compile(
+    r"((?:M[tT]|[kKgG][tT]|[tT])?CO)([^\n]*)\n\s*(2eq?)",
+    re.IGNORECASE,
+)
+
+
+def normalize_co2(text: str) -> str:
+    """Fix common PDF artefacts where CO₂e is split across tokens or lines."""
+    def _repl_inline(m: re.Match) -> str:
+        return "CO2eq" if "q" in m.group(0).lower() else "CO2e"
+
+    text = _CO2_INLINE.sub(_repl_inline, text)
+    text = _CO2_SUFFIX_AFTER.sub("CO2e", text)
+
+    def _repl_next_line(m: re.Match) -> str:
+        prefix, middle, suffix = m.group(1), m.group(2), m.group(3)
+        unit_tag = "2eq" if "q" in suffix.lower() else "2e"
+        return prefix + unit_tag + middle
+
+    text = _CO2_NEXT_LINE.sub(_repl_next_line, text)
+    return text
+
+
 _THOUSANDS_COMMA = re.compile(r"^-?\d{1,3}(,\d{3})+(\.\d+)?$")
 _SPACE_THOUSANDS = re.compile(r"^-?\d{1,3}( \d{3})+(\.\d+)?$")
 _EU_DECIMAL = re.compile(r"^-?\d+,\d{1,2}$")  # comma + 1 or 2 trailing digits -> decimal
@@ -34,9 +65,10 @@ _UNIT_ALIASES: dict[str, str] = {
     "gj": "GJ", "tj": "TJ", "pj": "PJ",
     # emissions
     "tco2e": "tCO2e", "t co2e": "tCO2e", "t co2-eq": "tCO2e",
-    "tonnes co2e": "tCO2e", "tonnes co2-eq": "tCO2e",
-    "ktco2e": "ktCO2e", "kt co2e": "ktCO2e",
-    "mtco2e": "MtCO2e", "mt co2e": "MtCO2e",
+    "tco2eq": "tCO2e", "t co2eq": "tCO2e",
+    "tonnes co2e": "tCO2e", "tonnes co2-eq": "tCO2e", "tonnes co2eq": "tCO2e",
+    "ktco2e": "ktCO2e", "kt co2e": "ktCO2e", "ktco2eq": "ktCO2e",
+    "mtco2e": "MtCO2e", "mt co2e": "MtCO2e", "mtco2eq": "MtCO2e",
     # water
     "m3": "m3", "m³": "m3", "cubic metres": "m3", "cubic meters": "m3",
     "ml": "ML", "megalitres": "ML", "megaliters": "ML",
@@ -137,4 +169,26 @@ def parse_value(
             continue
         if canonical in accepted_canonicals:
             return value, canonical
+
+    # Secondary scan: unit-before-number (common in tabular PDF text where the
+    # unit appears as a column header before a row of values).
+    # Return the FIRST number following the unit (= most-recent year column).
+    rev_pattern = re.compile(
+        rf"({unit_alt})\s+({_NUMBER_RE})",
+        re.IGNORECASE,
+    )
+    for m in rev_pattern.finditer(text):
+        raw_unit, raw_num = m.group(1), m.group(2)
+        try:
+            canonical = canonicalize_unit(raw_unit)
+        except ValueError:
+            continue
+        if canonical not in accepted_canonicals:
+            continue
+        try:
+            value = parse_number(raw_num)
+        except ValueError:
+            continue
+        return value, canonical
+
     return None

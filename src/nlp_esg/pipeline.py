@@ -70,6 +70,11 @@ def run_evaluation(
 
 
 def main() -> None:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     indexed = load_indexed_reports()
     log.info("Loaded %d reports", len(indexed))

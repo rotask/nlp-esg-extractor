@@ -10,6 +10,7 @@ from sentence_transformers import SentenceTransformer, models
 
 from nlp_esg.config import EMBEDDING_MODEL_NAME
 from nlp_esg.ingest import ParsedReport, Page, TableEntry
+from nlp_esg.normalize import normalize_co2
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ def build_index(report: ParsedReport, model_name: str | None = None) -> IndexedR
     sent_texts: list[str] = []
     sent_pages: list[int] = []
     for page in report["pages"]:
-        for s in split_sentences(page["text"]):
+        for s in split_sentences(normalize_co2(page["text"])):
             sent_texts.append(s)
             sent_pages.append(page["page_num"])
 
