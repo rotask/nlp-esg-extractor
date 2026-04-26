@@ -295,7 +295,13 @@ class BaselineExtractor(Extractor):
         negative_tokens = [t.lower() for t in kpi.get("negative_tokens", [])]
         lo, hi = kpi["plausible_range"]
 
-        best: tuple[float, float, str, str, int] | None = None
+        # Collect ALL candidates that pass filters, then resolve ties on the
+        # consolidated-vs-segment ambiguity by preferring the larger canonical
+        # value among candidates with similar kw_score. The classic case is
+        # Eni scope_1, where the consolidated 28.4 MtCO2e and a segment-level
+        # 18.6 MtCO2e share the same template; the only distinguishing signal
+        # is magnitude.
+        candidates: list[dict] = []
         for pn in top_pages:
             page = pages_by_num.get(pn)
             if page is None:
@@ -323,9 +329,6 @@ class BaselineExtractor(Extractor):
                 if unit not in unit_family_canonicals:
                     continue
 
-                # Year-column awareness: if a year header sits nearby, use it
-                # to pick the column on this data line. Magnitude is preserved
-                # via ratio scaling: raw_value * (target_col_num / first_data_num).
                 adjusted = self._pick_year_column_value(
                     page_lines, li, stripped, raw_value
                 )
@@ -342,21 +345,37 @@ class BaselineExtractor(Extractor):
                         flags.append("out_of_range")
                     continue
 
-                # Page-rank bonus: lines on the top-ranked page outscore lines
-                # on lower-ranked pages with similar keyword density.
                 rank_bonus = 0.5 * (1.0 - page_rank[pn] / max(1, len(top_pages)))
-                # 'Total' prefix bonus: the line that starts with 'Total ...'
-                # is structurally the consolidated row.
                 total_bonus = 0.3 if line_lower.lstrip("|").lstrip().startswith("total ") else 0.0
                 score = kw_score + rank_bonus + total_bonus
+                candidates.append({
+                    "score": score, "kw_score": kw_score,
+                    "canonical_value": canonical_value,
+                    "snippet": stripped, "unit": unit, "page": pn,
+                })
 
-                if best is None or score > best[0]:
-                    best = (score, canonical_value, stripped, unit, pn)
-
-        if best is None:
+        if not candidates:
             return None
 
-        score, canonical_value, snippet, unit, page = best
+        # Pick the highest-scoring candidate. If multiple candidates have
+        # kw_scores within 0.05 of the best (= same content template but
+        # different pages/segments), prefer the LARGEST canonical value.
+        # This correctly resolves consolidated-vs-segment lines for emissions
+        # without affecting water/energy where year-column has already picked
+        # the right within-line value.
+        candidates.sort(key=lambda c: c["score"], reverse=True)
+        best_kw = candidates[0]["kw_score"]
+        kw_tied = [c for c in candidates if abs(c["kw_score"] - best_kw) < 0.05]
+        if len(kw_tied) > 1:
+            best = max(kw_tied, key=lambda c: c["canonical_value"])
+        else:
+            best = candidates[0]
+
+        score = best["score"]
+        canonical_value = best["canonical_value"]
+        snippet = best["snippet"]
+        unit = best["unit"]
+        page = best["page"]
         return KPIExtraction(
             company=report["company"],
             report_year=report["report_year"],
