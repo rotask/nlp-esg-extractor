@@ -3,6 +3,7 @@ import numpy as np
 
 import logging
 import re
+from collections import defaultdict
 from functools import lru_cache
 from typing import TypedDict
 
@@ -163,3 +164,30 @@ def rank_pages_cosine(
         scored.append((p["page_num"], base + bonus))
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored
+
+
+def _rrf_combine(
+    rankings: list[list[tuple[int, float]]], k: int = 60
+) -> list[tuple[int, float]]:
+    """Reciprocal-rank fusion. Each ranking is [(page_num, score)] sorted desc."""
+    fused: dict[int, float] = defaultdict(float)
+    for ranking in rankings:
+        for rank, (page_num, _) in enumerate(ranking):
+            fused[page_num] += 1.0 / (k + rank)
+    return sorted(fused.items(), key=lambda x: -x[1])
+
+
+def rank_pages_rrf(
+    report: IndexedReport,
+    queries: list[str],
+    unit_tokens: list[str] | None = None,
+    k: int = 60,
+) -> list[tuple[int, float]]:
+    """Multi-query page ranking via reciprocal-rank fusion."""
+    if not queries:
+        return []
+    rankings = []
+    for q in queries:
+        q_emb = embed_texts([q])[0]
+        rankings.append(rank_pages_cosine(report, q_emb, unit_tokens=unit_tokens))
+    return _rrf_combine(rankings, k=k)

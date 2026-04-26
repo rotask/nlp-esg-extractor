@@ -64,6 +64,42 @@ def test_rank_pages_cosine_returns_pages_sorted_by_max_sim():
     assert ranked[1][0] == 1
 
 
+def test_rrf_combines_ranks():
+    """A page that's rank-2 in two queries should beat a page that's rank-1 in one."""
+    from nlp_esg.retrieval import _rrf_combine
+    rankings = [
+        [(1, 0.9), (2, 0.8), (3, 0.5)],
+        [(2, 0.95), (1, 0.7), (3, 0.4)],
+    ]
+    fused = _rrf_combine(rankings, k=60)
+    by_page = dict(fused)
+    assert by_page[2] > by_page[3]
+    assert abs(by_page[1] - by_page[2]) < 1e-9
+
+
+def test_rank_pages_rrf_uses_multiple_queries(monkeypatch):
+    """rank_pages_rrf calls rank_pages_cosine once per query and fuses."""
+    from nlp_esg.retrieval import rank_pages_rrf
+    indexed = _ix(
+        pages=[{"page_num": i, "text": ""} for i in (1, 2, 3)],
+        sentences=[], table_headers=[], tables=[],
+    )
+    fake_embed = lambda texts, model_name=None: np.array([[1.0, 0.0]] * len(texts), dtype=np.float32)
+    monkeypatch.setattr("nlp_esg.retrieval.embed_texts", fake_embed)
+
+    rankings = iter([
+        [(1, 0.9), (2, 0.5), (3, 0.1)],
+        [(2, 0.9), (1, 0.5), (3, 0.1)],
+    ])
+    monkeypatch.setattr(
+        "nlp_esg.retrieval.rank_pages_cosine",
+        lambda *a, **kw: next(rankings),
+    )
+    out = rank_pages_rrf(indexed, ["q1", "q2"])
+    assert out[0][0] in (1, 2)
+    assert out[-1][0] == 3
+
+
 def test_rank_pages_cosine_unit_presence_boost():
     from nlp_esg.retrieval import rank_pages_cosine
     q = np.array([1.0, 0.0], dtype=np.float32)
