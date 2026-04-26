@@ -42,6 +42,11 @@ def _parse_filename(path: Path) -> tuple[str, int]:
     return m.group("company").lower(), int(m.group("year"))
 
 
+# Imported here (after ParsedReport / _parse_filename are defined) to avoid
+# a partial-module circular-import cycle: ingest_docling imports from ingest.
+from nlp_esg.ingest_docling import parse_with_docling  # noqa: E402
+
+
 def _parse_with_pdfplumber(path: Path) -> ParsedReport:
     """Parse a PDF with pdfplumber. No caching — the caller handles cache."""
     company, year = _parse_filename(path)
@@ -70,18 +75,31 @@ def _parse_with_pdfplumber(path: Path) -> ParsedReport:
 
 
 def parse_pdf(path: Path, use_cache: bool = True) -> ParsedReport:
-    """Parse a PDF into pages + tables. Caches to data/cache based on mtime."""
+    """Parse a PDF into pages + tables. Tries Docling first, falls back to pdfplumber.
+
+    Cache filename includes the parser tag so v1 (pdfplumber-only) and v2
+    (Docling-first) caches coexist on disk.
+    """
     company, year = _parse_filename(path)
-    cache_path = CACHE_DIR / f"{company}_{year}_pdfplumber.pkl"
+    docling_cache = CACHE_DIR / f"{company}_{year}_docling.pkl"
+    pdfplumber_cache = CACHE_DIR / f"{company}_{year}_pdfplumber.pkl"
 
-    if use_cache and cache_path.exists() and cache_path.stat().st_mtime >= path.stat().st_mtime:
-        with cache_path.open("rb") as f:
-            return pickle.load(f)
+    if use_cache:
+        for cache_path in (docling_cache, pdfplumber_cache):
+            if cache_path.exists() and cache_path.stat().st_mtime >= path.stat().st_mtime:
+                with cache_path.open("rb") as f:
+                    return pickle.load(f)
 
-    report = _parse_with_pdfplumber(path)
+    report = parse_with_docling(path)
+    used_parser = "docling"
+    if report is None or not report["pages"]:
+        log.warning("docling failed for %s; falling back to pdfplumber", path.name)
+        report = _parse_with_pdfplumber(path)
+        used_parser = "pdfplumber"
 
     if use_cache:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_path = CACHE_DIR / f"{company}_{year}_{used_parser}.pkl"
         with cache_path.open("wb") as f:
             pickle.dump(report, f)
 
