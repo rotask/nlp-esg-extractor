@@ -552,3 +552,129 @@ run because of the API credit constraint; the cache-key fix means
 the v1 cached responses will not contaminate the v2 evaluation
 when credits return. Docling did not work on this corpus + machine
 and is now opt-in via env var rather than load-bearing.
+
+---
+
+## 6. Iteration 3 (2026-04-26): line scanner + year-column awareness
+
+A focused follow-up after iteration 2 examined what pdfplumber
+actually emits per (company × KPI) cell. For 8 of the 13 then-missed
+cells, the value, label, and unit all sat on a **single line of page
+text** — but the legacy "sentence fallback" never saw them because
+its regex sentence splitter chops on `[.!?]` and ESG data lines end
+in numbers, not punctuation.
+
+### 6.1 What changed
+
+1. **Line-scanning fallback** (`extractors/baseline._scan_lines_for_kpi`).
+   Replaces the legacy sentence fallback. Ranks pages with the iteration-2
+   `rank_pages_hybrid` (BM25 + RRF), takes the top 8, scans every line
+   on each page. Per line: KPI keyword density score, per-KPI
+   `negative_tokens` filter, `parse_value` to extract `(value, unit)`,
+   plausible-range filter. Picks the best score across all top pages.
+   Adds a small page-rank bonus (lines on rank-1 pages outscore lines
+   on rank-8 pages with similar keyword density) and a "starts with
+   Total" bonus.
+
+2. **Year-column awareness** (`_pick_year_column_value`). When the data
+   line has multiple year-column values (e.g. BP datasheet's 5-year
+   row), search ±5 lines above and ±2 below for a year-row header
+   (sequential years in 2010–2030, no gaps). If found, pick the
+   column position of the most-recent year. Two robustness details:
+   (a) take the **last N** parsed numbers from the data line, since
+   noise digits ("1" in "Scope 1", "2" in "MtCO2e") sit before the
+   data values; (b) preserve magnitude via ratio scaling
+   `raw_value * (target_col_num / first_data_num)` so "million MWh"
+   keeps its multiplier.
+
+3. **`parse_value` upgrades** (`normalize.py`). New patterns:
+   - magnitude-before-unit-before-number ("million MWh 269")
+   - parenthesised unit ("(MWh) 84,399,860")
+   - PDF rendering quirks ("millionm 3", ".000 m3", "m 3") split via
+     a `_normalize_for_parse` pre-pass
+   - Stricter `_NUMBER_IN_TEXT_RE` drops space-as-thousands so
+     "269 289" reads as two values, not 269,289
+
+4. **`negative_tokens` extended and applied in the table path too**.
+   This kills the Iberdrola "Energy production from renewable sources"
+   table FP that survived iteration 2 (the table-first path didn't have
+   the filter; only the line scanner did).
+
+5. **Mm³ unit alias** (`normalize._UNIT_ALIASES`). Maps `Mm3`/`Mm³`
+   to a new canonical "Mm3" with `(Mm3, m3): 1e6` conversion, for
+   Eni-style headers like `Water consumption(a) (Mm3) 42 12 45 9`.
+
+6. **Indexed-report cache** (`retrieval.build_index`). The expensive
+   ClimateBERT forward pass (~5–15 min per long report on CPU) is now
+   cached to `data/cache/{company}_{year}_{parser}_indexed_{model}.pkl`.
+   Iteration speed went from "every run rebuilds embeddings" to "first
+   run rebuilds, all later runs load from disk in seconds".
+
+### 6.2 Headline numbers
+
+| Run | Extractor | KPI | TP | FP | FN | Precision | Recall | F1 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| v2 | baseline | scope_1 | 0 | 0 | 5 | 0.00 | 0.00 | 0.00 |
+| v2 | baseline | total_energy | 1 | 1 | 3 | 0.50 | 0.25 | 0.33 |
+| v2 | baseline | water | 0 | 0 | 5 | 0.00 | 0.00 | 0.00 |
+| **v3** | **baseline** | **scope_1** | **1** | **2** | **2** | **0.33** | **0.33** | **0.33** |
+| **v3** | **baseline** | **total_energy** | **4** | **1** | **0** | **0.80** | **1.00** | **0.89** |
+| **v3** | **baseline** | **water** | **2** | **2** | **1** | **0.50** | **0.67** | **0.57** |
+
+Aggregate baseline: **7 TP / 15** (up from 1). Macro-F1 ≈ 0.60 (up from 0.11). LLM
+half is still 0/15 — credits remain exhausted, no v3 LLM evaluation
+possible.
+
+### 6.3 Per-cell breakdown
+
+| Company | KPI | Gold | v3 baseline | Verdict |
+| --- | --- | --- | --- | --- |
+| BP | scope_1 | 33.7 M tCO2e | 33,700,000 | ✅ year-col fix |
+| BP | total_energy | 134.4 M MWh | 134,448,000 | ✅ table path |
+| BP | water | 47.3 M m³ | 53,600,000 | ❌ year-col didn't fire on this line (line is from a regional sub-row) |
+| Enel | scope_1 | 18.95 M tCO2e | 62,530,000 | ❌ wrapped line `2 and 3) totaled 62.53` — neg-token "scopes 1, 2" doesn't catch the wrap |
+| Enel | total_energy | 168.59 M MWh | 70,000 | ❌ wrong page entirely (price-tier "between 70,000 MWh and 150,000 MWh") |
+| Enel | water | 32.14 M m³ | 32,141,000 | ✅ |
+| Eni | scope_1 | 28.4 M tCO2e | 18,600,000 | ❌ wrong page (167 has segment-specific 18.6, gold's 28.4 is on 166) |
+| Eni | total_energy | 84.4 M MWh | 84,399,860 | ✅ |
+| Eni | water | 42 M m³ | None | ❌ Mm3 alias added but didn't fire — needs further debug |
+| Iberdrola | scope_1 | 5.25 M tCO2e | None | ❌ no clean labelled line; SF6 sub-source correctly rejected |
+| Iberdrola | total_energy | 101.6 M MWh | 101,572,520 | ✅ table path with neg-token rejecting renewables row |
+| Iberdrola | water | 45.6 M m³ | 45,642,187 | ✅ "discontinued" neg-token unblocked the right line |
+| Shell | scope_1 | 69 M tCO2e | None | ❌ ESRS aggregation (69 vs 46) — inherently LLM territory |
+| Shell | total_energy | 269 M MWh | 269,000,000 | ✅ magnitude-preservation fix |
+| Shell | water | 26 M m³ | 72,000,000 | ❌ narrative "around 72 million cubic metres" picked over total |
+
+### 6.4 What remains unfindable for the baseline
+
+The 8 remaining errors split into:
+
+- **3 wrong-page cases** (Enel total_energy, Eni scope_1, BP water). The
+  right page exists but the hybrid retrieval doesn't rank it first.
+  Potential mitigations: a higher RRF k value, more KPI query variants,
+  or a "starts with Total <kpi-phrase>" boost weighted higher than the
+  current modest +0.3.
+- **2 narrative-vs-total ambiguities** (Shell water "around 72 million
+  cubic metres", Enel scope_1 "scopes 1, 2 and 3 totaled"). Lines
+  that match keywords but report a different aggregate. Filtering them
+  needs sentence-level reasoning or a much harder negative-token
+  taxonomy.
+- **2 no-clean-line cases** (Iberdrola scope_1, Shell scope_1). The
+  gold values (5,246,890 and 69 M) are on pages where they appear as
+  bare numbers without an adjacent label, or only as part of an
+  ESRS-aggregation calculation that requires summing operated
+  non-consolidated entities. Inherently LLM territory per FINDINGS §2.6.
+- **1 unit-alias miss** (Eni water Mm³ 42 → 42 M m³). The alias was
+  added but the parser still misses the line for reasons that need
+  in-line debugging.
+
+### 6.5 Headline takeaway for this iteration
+
+Baseline lifted from **1/15 → 7/15** without any LLM call. The
+combination of `parse_value` magnitude/separator handling +
+line-scanning fallback + year-column awareness + per-KPI
+negative-token filtering covers the majority of the corpus's
+structural extraction problems. The remaining 8 cells split between
+LLM-territory disambiguation and a few page-ranking edge cases that
+would need iteration-4 investigation — but the baseline is now a
+genuine extractor, not just a comparison/diagnostic.
