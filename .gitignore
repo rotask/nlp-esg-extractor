@@ -13,6 +13,15 @@ env/
 # Project caches
 data/cache/
 
+# Raw report PDFs are kept locally, not committed (sizeable; sometimes licence-restricted)
+data/reports/
+
+# Per-run extraction CSVs (generated artefacts; the writeup pulls from these)
+data/runs/
+
+# Claude Code agent settings (machine-local)
+.claude/
+
 # Notebook checkpoints
 .ipynb_checkpoints/
 
