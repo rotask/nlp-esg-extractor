@@ -14,6 +14,11 @@ _CO2_NEXT_LINE = re.compile(
     r"((?:M[tT]|[kKgG][tT]|[tT])?CO)([^\n]*)\n\s*(2eq?)",
     re.IGNORECASE,
 )
+# BP pattern: "MtCOe [numbers]\n2\n" — the unit token already contains the trailing
+# "e" and the subscript "2" is alone on its own line.
+_CO2_LONE_SUBSCRIPT = re.compile(
+    r"(?P<unit>(?:M[tT]|[kKgG][tT]|[tT])?CO)e([^\n]*)\n\s*2(?=\s*\n)"
+)
 
 
 def normalize_co2(text: str) -> str:
@@ -30,6 +35,7 @@ def normalize_co2(text: str) -> str:
         return prefix + unit_tag + middle
 
     text = _CO2_NEXT_LINE.sub(_repl_next_line, text)
+    text = _CO2_LONE_SUBSCRIPT.sub(r"\g<unit>2e\2", text)
     return text
 
 

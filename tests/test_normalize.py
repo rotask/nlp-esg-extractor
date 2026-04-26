@@ -1,5 +1,11 @@
 import pytest
-from nlp_esg.normalize import canonicalize_unit, parse_number, parse_value, to_canonical_value
+from nlp_esg.normalize import (
+    canonicalize_unit,
+    normalize_co2,
+    parse_number,
+    parse_value,
+    to_canonical_value,
+)
 
 
 def test_plain_integer():
@@ -150,3 +156,19 @@ def test_parse_value_picks_first_match():
 def test_parse_value_rejects_unit_substring_match():
     # "5 mlg" must NOT match "5 ml" and be treated as 5 ML water
     assert parse_value("5 mlg of something", kpi_unit_family=["m3", "ML"]) is None
+
+
+def test_lone_subscript_2_on_own_line():
+    """BP pattern: 'MtCOe ... \\n2 \\n' — subscript-2 alone on its own line."""
+    raw = "Scope 1 (direct) greenhouse gas MtCOe 33.2 30.4 31.1 32.8 33.7\n2\nemissions k l GHG"
+    out = normalize_co2(raw)
+    assert "MtCO2e" in out
+    # The pre-fix unit form must be gone.
+    assert "MtCOe " not in out
+
+
+def test_lone_subscript_2_does_not_corrupt_normal_text():
+    """A '2' on its own line that is NOT preceded by a CO unit must not change."""
+    raw = "Methodology section.\n2\nThis paragraph discusses scope 1."
+    out = normalize_co2(raw)
+    assert out == raw
