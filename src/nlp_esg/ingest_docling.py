@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import os
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -7,6 +8,18 @@ if TYPE_CHECKING:
     from nlp_esg.ingest import ParsedReport
 
 log = logging.getLogger(__name__)
+
+
+def _docling_disabled() -> bool:
+    """Honour the NLP_ESG_DISABLE_DOCLING env var.
+
+    On some machines Docling's layout model segfaults (std::bad_alloc /
+    SIGSEGV) on long ESG PDFs, which kills the host Python process and
+    bypasses our Python-level fallback. The env var lets the user skip
+    Docling entirely without touching code.
+    """
+    val = os.environ.get("NLP_ESG_DISABLE_DOCLING", "").strip().lower()
+    return val in {"1", "true", "yes", "on"}
 
 try:
     from docling.document_converter import DocumentConverter  # noqa: F401
@@ -21,6 +34,10 @@ def parse_with_docling(path: Path) -> "ParsedReport | None":
     """Parse a PDF with Docling. Return None on any failure so the caller can fall back."""
     # Imported lazily to avoid a circular import with nlp_esg.ingest.
     from nlp_esg.ingest import _parse_filename
+
+    if _docling_disabled():
+        log.info("docling disabled via NLP_ESG_DISABLE_DOCLING; falling back")
+        return None
 
     if DocumentConverter is None:
         log.warning("docling not installed; caller should fall back")

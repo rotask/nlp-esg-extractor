@@ -62,6 +62,18 @@ def test_parse_with_docling_returns_none_on_empty_pages(tmp_path):
     assert report is None
 
 
+def test_parse_with_docling_disabled_via_env(tmp_path, monkeypatch):
+    """NLP_ESG_DISABLE_DOCLING=1 should skip Docling without invoking it."""
+    monkeypatch.setenv("NLP_ESG_DISABLE_DOCLING", "1")
+    pdf = tmp_path / "any_2024.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    converter = MagicMock()
+    with patch("nlp_esg.ingest_docling.DocumentConverter", return_value=converter):
+        report = parse_with_docling(pdf)
+    assert report is None
+    converter.convert.assert_not_called()
+
+
 def test_parse_with_docling_skips_oversized_files(tmp_path):
     """Files above the size threshold should skip Docling immediately."""
     pdf = tmp_path / "big_2024.pdf"
