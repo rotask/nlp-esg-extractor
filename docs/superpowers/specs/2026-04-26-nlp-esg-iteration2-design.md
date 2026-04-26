@@ -49,9 +49,8 @@ See decision table in §2 — explicitly excluded items are not implemented.
 
 ```
 src/nlp_esg/
-├── ingest.py                 [MODIFIED]   try Docling → fall back to pdfplumber
+├── ingest.py                 [MODIFIED]   parse_pdf() now tries Docling → falls back to pdfplumber; existing pdfplumber code stays in this file as the fallback branch
 ├── ingest_docling.py         [NEW]        Docling parsing path
-├── ingest_pdfplumber.py      [RENAMED]    existing pdfplumber code, lifted out of ingest.py
 ├── retrieval.py              [MODIFIED]   RRF + BM25 hybrid
 ├── normalize.py              [MODIFIED]   _CO2_LONE_SUBSCRIPT pattern added
 ├── extractors/
@@ -143,19 +142,22 @@ def parse_with_docling(pdf_path: Path) -> ParsedReport | None:
 
 ### 5.2 `ingest.py` (modified)
 
+The existing public function `parse_pdf(path: Path, use_cache: bool = True) -> ParsedReport` is updated; signature is unchanged. The existing pdfplumber logic moves inside a private `_parse_with_pdfplumber(path)` in the same file. Dispatcher logic:
+
 ```python
-def parse_report(pdf_path: Path) -> ParsedReport:
-    parsed = parse_with_docling(pdf_path)
+def parse_pdf(path: Path, use_cache: bool = True) -> ParsedReport:
+    # cache lookup as today, but the cache path now includes parser tag
+    parsed = parse_with_docling(path)
     if parsed is None or not parsed["pages"]:
-        log.warning("docling failed for %s; falling back to pdfplumber", pdf_path.name)
-        parsed = parse_with_pdfplumber(pdf_path)
+        log.warning("docling failed for %s; falling back to pdfplumber", path.name)
+        parsed = _parse_with_pdfplumber(path)
         parsed["parser"] = "pdfplumber"
     else:
         parsed["parser"] = "docling"
     return parsed
 ```
 
-Cache key includes `parser`: `data/cache/{company}_{year}_{parser}.pkl`. Existing parser-less filenames are read transparently when only that file is present (back-compat for the v1 pkl cache).
+Cache filename gains the parser tag: `data/cache/{company}_{year}_{parser}.pkl`. The v1 parser-less pkl files (`bp_2024.pkl` etc.) are not read by the new pipeline; they remain on disk only as historical artefacts and can be deleted by the user at will.
 
 ### 5.3 `retrieval.py` (modified)
 
@@ -245,9 +247,14 @@ Everything else (`tool_choice`, `temperature=0`, `record_kpi` schema, `reporting
 
 ### 5.7 `pipeline.py` and `compare.py` (modified)
 
-`pipeline.py` accepts `--run-tag <name>` (default `"v2_docling"`). Output directory is `data/runs/{run_tag}/extractions.csv`.
+`pipeline.py` today only prints comparison and metrics DataFrames; it does not persist extractions. This iteration adds a **new** persistence step:
 
-`compare.py` gains `build_run_comparison(runs: list[str]) -> DataFrame` that joins per-run extractions on `(company, kpi)` and emits the side-by-side comparison table described in §6 of the brainstorming. The roll-up P/R/F1 table is produced by reusing the existing `evaluate.py` per run and concatenating.
+- `main()` accepts `--run-tag <name>` (default `"v2_docling"`).
+- After `run_extraction`, write the full extractions list to `data/runs/{run_tag}/extractions.csv` and the metrics table to `data/runs/{run_tag}/metrics.csv`.
+- The existing print-to-stdout behaviour for `build_comparison_table` and `run_evaluation` stays.
+- Each `KPIExtraction` is stamped with `run_tag` before persistence so `compare.py` can rebuild the multi-run view from the CSVs alone.
+
+`compare.py` gains `build_run_comparison(runs: list[str]) -> DataFrame` that reads `data/runs/{run}/extractions.csv` for each run, joins them on `(company, kpi)` and emits the side-by-side comparison table described in §6 of the brainstorming. The roll-up P/R/F1 table is produced by reusing the existing `evaluate.py` per run and concatenating.
 
 ## 6. Error handling
 
