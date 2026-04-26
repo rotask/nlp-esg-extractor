@@ -2,6 +2,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,44 @@ _TOOL_SCHEMA = {
     },
 }
 
+# Gemini uses a different tool format; same fields, slightly different shape.
+_GEMINI_TOOLS = [{
+    "function_declarations": [{
+        "name": "record_kpi",
+        "description": "Record the extracted KPI value. Use null for value when the KPI is not reported.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "number", "nullable": True},
+                "unit": {"type": "string", "nullable": True},
+                "reporting_year": {"type": "integer", "nullable": True},
+                "source_snippet": {"type": "string", "nullable": True},
+                "confidence": {"type": "number"},
+            },
+            "required": ["value", "unit", "reporting_year", "source_snippet", "confidence"],
+        },
+    }],
+}]
+_GEMINI_TOOL_CONFIG = {
+    "function_calling_config": {
+        "mode": "ANY",
+        "allowed_function_names": ["record_kpi"],
+    }
+}
+
+_VALID_PROVIDERS = ("anthropic", "gemini")
+
+
+def _gemini_client():
+    """Lazy import + create a Gemini client. Module-level so tests can patch it."""
+    from google import genai
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY (or GOOGLE_API_KEY) is not set; cannot create Gemini client."
+        )
+    return genai.Client(api_key=api_key)
+
 _SYSTEM_PROMPT = """You are an information-extraction assistant for ESG sustainability reports.
 
 You will be given:
@@ -60,10 +99,23 @@ class LLMExtractor(Extractor):
 
     def __init__(
         self,
-        model: str = ANTHROPIC_MODEL,
+        model: str | None = None,
         max_retries: int = 3,
         retry_base_delay: float = 1.0,
+        provider: str | None = None,
     ):
+        if provider is None:
+            provider = os.environ.get("LLM_PROVIDER", "anthropic")
+        if provider not in _VALID_PROVIDERS:
+            raise ValueError(
+                f"Unknown provider {provider!r}; expected one of {_VALID_PROVIDERS}"
+            )
+        if model is None:
+            if provider == "gemini":
+                model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+            else:
+                model = os.environ.get("ANTHROPIC_MODEL", ANTHROPIC_MODEL)
+        self.provider = provider
         self.model = model
         self.max_retries = max_retries
         self.retry_base_delay = retry_base_delay
@@ -207,32 +259,67 @@ class LLMExtractor(Extractor):
             flags=flags,
         )
 
-    def _call_with_retry(self, user_prompt: str, kpi_key: str) -> dict | None:
+    def _call_with_retry(
+        self, user_prompt: str, kpi_key: str, system_prompt: str = _SYSTEM_PROMPT,
+    ) -> dict | None:
         for attempt in range(self.max_retries):
             try:
-                resp = self.client.messages.create(
-                    model=self.model,
-                    max_tokens=500,
-                    temperature=0,
-                    system=[{
-                        "type": "text",
-                        "text": _SYSTEM_PROMPT,
-                        "cache_control": {"type": "ephemeral"},
-                    }],
-                    tools=[_TOOL_SCHEMA],
-                    tool_choice={"type": "tool", "name": "record_kpi"},
-                    messages=[{"role": "user", "content": user_prompt}],
-                )
-                for block in resp.content:
-                    if getattr(block, "type", None) == "tool_use" and block.name == "record_kpi":
-                        return dict(block.input)
-                log.warning("LLM response had no tool_use block for %s", kpi_key)
-                return None
+                if self.provider == "anthropic":
+                    return self._call_anthropic_once(user_prompt, kpi_key, system_prompt)
+                if self.provider == "gemini":
+                    return self._call_gemini_once(user_prompt, kpi_key, system_prompt)
+                raise ValueError(f"Unsupported provider {self.provider!r}")
             except Exception as e:
                 log.warning("LLM call failed (attempt %d/%d): %s",
                             attempt + 1, self.max_retries, e)
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_base_delay * (2 ** attempt))
+        return None
+
+    def _call_anthropic_once(
+        self, user_prompt: str, kpi_key: str, system_prompt: str
+    ) -> dict | None:
+        resp = self.client.messages.create(
+            model=self.model,
+            max_tokens=500,
+            temperature=0,
+            system=[{
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            tools=[_TOOL_SCHEMA],
+            tool_choice={"type": "tool", "name": "record_kpi"},
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        for block in resp.content:
+            if getattr(block, "type", None) == "tool_use" and block.name == "record_kpi":
+                return dict(block.input)
+        log.warning("LLM response had no tool_use block for %s", kpi_key)
+        return None
+
+    def _call_gemini_once(
+        self, user_prompt: str, kpi_key: str, system_prompt: str
+    ) -> dict | None:
+        client = _gemini_client()
+        config = {
+            "system_instruction": system_prompt,
+            "temperature": 0,
+            "max_output_tokens": 500,
+            "tools": _GEMINI_TOOLS,
+            "tool_config": _GEMINI_TOOL_CONFIG,
+        }
+        resp = client.models.generate_content(
+            model=self.model, contents=user_prompt, config=config,
+        )
+        for cand in (resp.candidates or []):
+            content = getattr(cand, "content", None)
+            for part in getattr(content, "parts", []) or []:
+                fc = getattr(part, "function_call", None)
+                if fc and getattr(fc, "name", None) == "record_kpi":
+                    args = getattr(fc, "args", None) or {}
+                    return dict(args)
+        log.warning("Gemini response had no function_call for %s", kpi_key)
         return None
 
     def _not_reported(self, report: Any, kpi_key: str, flags: list[str]) -> KPIExtraction:

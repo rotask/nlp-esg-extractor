@@ -124,7 +124,10 @@ def test_build_index_table_header_includes_row_labels(monkeypatch):
             ],
         }],
     }
-    build_index(parsed)
+    # use_cache=False: don't read OR write the on-disk indexed cache; otherwise
+    # this synthetic 1-page test would either short-circuit on the real cache
+    # or overwrite it with garbage data, depending on timing.
+    build_index(parsed, use_cache=False)
     # The second embed_texts call is for table headers.
     header_strings = captured[1]
     assert any("Total gross Scope 1 GHG emissions" in hs for hs in header_strings)

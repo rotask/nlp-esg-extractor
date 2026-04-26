@@ -159,6 +159,129 @@ def test_cache_key_stable_when_inputs_match():
     assert k1 == k2
 
 
+def test_provider_defaults_to_anthropic(monkeypatch):
+    """With no env var and no kwarg, LLMExtractor uses Anthropic — backwards compat."""
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    from nlp_esg.extractors.llm import LLMExtractor
+    ext = LLMExtractor()
+    assert ext.provider == "anthropic"
+
+
+def test_provider_reads_env_when_not_passed(monkeypatch):
+    """LLM_PROVIDER and GEMINI_MODEL env vars drive the default selection."""
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-flash")
+    from nlp_esg.extractors.llm import LLMExtractor
+    ext = LLMExtractor()
+    assert ext.provider == "gemini"
+    assert ext.model == "gemini-2.5-flash"
+
+
+def test_explicit_kwarg_overrides_env(monkeypatch):
+    """An explicit provider= kwarg always wins over the env var."""
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    from nlp_esg.extractors.llm import LLMExtractor
+    ext = LLMExtractor(provider="anthropic", model="claude-sonnet-4-6")
+    assert ext.provider == "anthropic"
+    assert ext.model == "claude-sonnet-4-6"
+
+
+def test_provider_can_be_set_to_gemini():
+    """LLMExtractor accepts provider='gemini' and stores it."""
+    from nlp_esg.extractors.llm import LLMExtractor
+    ext = LLMExtractor(provider="gemini", model="gemini-2.0-flash")
+    assert ext.provider == "gemini"
+    assert ext.model == "gemini-2.0-flash"
+
+
+def test_invalid_provider_raises():
+    """Unknown providers should fail fast at construction."""
+    from nlp_esg.extractors.llm import LLMExtractor
+    with pytest.raises(ValueError, match="provider"):
+        LLMExtractor(provider="not-a-real-provider")
+
+
+def test_gemini_provider_parses_function_call_response():
+    """Gemini provider should call generate_content and return the function_call args."""
+    from unittest.mock import MagicMock, patch
+    from nlp_esg.extractors.llm import LLMExtractor
+
+    # Build a fake Gemini response: candidates[0].content.parts[0].function_call
+    function_call = MagicMock()
+    function_call.name = "record_kpi"
+    function_call.args = {
+        "value": 33700000.0, "unit": "tCO2e", "reporting_year": 2024,
+        "source_snippet": "Total Scope 1 ...", "confidence": 0.92,
+    }
+    part = MagicMock(function_call=function_call)
+    candidate = MagicMock()
+    candidate.content = MagicMock(parts=[part])
+    response = MagicMock(candidates=[candidate])
+
+    fake_client = MagicMock()
+    fake_client.models.generate_content.return_value = response
+
+    with patch("nlp_esg.extractors.llm._gemini_client", return_value=fake_client):
+        ext = LLMExtractor(provider="gemini", model="gemini-2.0-flash")
+        result = ext._call_with_retry(
+            user_prompt="ctx",
+            kpi_key="scope_1_emissions",
+            system_prompt="rules",
+        )
+
+    assert result == {
+        "value": 33700000.0, "unit": "tCO2e", "reporting_year": 2024,
+        "source_snippet": "Total Scope 1 ...", "confidence": 0.92,
+    }
+    # Verify the Gemini SDK was called with the right model
+    call_kwargs = fake_client.models.generate_content.call_args.kwargs
+    assert call_kwargs["model"] == "gemini-2.0-flash"
+
+
+def test_gemini_provider_handles_no_function_call():
+    """If Gemini returns a response without a function_call block, return None."""
+    from unittest.mock import MagicMock, patch
+    from nlp_esg.extractors.llm import LLMExtractor
+
+    # Part has no function_call
+    part = MagicMock()
+    part.function_call = None
+    response = MagicMock(candidates=[MagicMock(content=MagicMock(parts=[part]))])
+
+    fake_client = MagicMock()
+    fake_client.models.generate_content.return_value = response
+    with patch("nlp_esg.extractors.llm._gemini_client", return_value=fake_client):
+        ext = LLMExtractor(provider="gemini", model="gemini-2.0-flash",
+                            max_retries=1, retry_base_delay=0)
+        result = ext._call_with_retry("ctx", "scope_1_emissions", "rules")
+    assert result is None
+
+
+def test_gemini_provider_retries_on_exception():
+    """Gemini call failures retry up to max_retries with backoff."""
+    from unittest.mock import MagicMock, patch
+    from nlp_esg.extractors.llm import LLMExtractor
+
+    function_call = MagicMock()
+    function_call.name = "record_kpi"
+    function_call.args = {"value": 1, "unit": "tCO2e", "reporting_year": 2024,
+                          "source_snippet": "x", "confidence": 0.9}
+    success_response = MagicMock(candidates=[MagicMock(content=MagicMock(
+        parts=[MagicMock(function_call=function_call)]))])
+
+    fake_client = MagicMock()
+    fake_client.models.generate_content.side_effect = [
+        Exception("transient"), success_response,
+    ]
+    with patch("nlp_esg.extractors.llm._gemini_client", return_value=fake_client):
+        ext = LLMExtractor(provider="gemini", model="gemini-2.0-flash",
+                            max_retries=2, retry_base_delay=0)
+        result = ext._call_with_retry("ctx", "scope_1_emissions", "rules")
+    assert result is not None
+    assert result["value"] == 1
+    assert fake_client.models.generate_content.call_count == 2
+
+
 def test_llm_build_context_uses_multi_query_hybrid(monkeypatch):
     """LLMExtractor._build_context should consult kpi['queries'] (plural)."""
     from nlp_esg.extractors.llm import LLMExtractor
