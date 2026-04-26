@@ -668,13 +668,86 @@ The 8 remaining errors split into:
   added but the parser still misses the line for reasons that need
   in-line debugging.
 
-### 6.5 Headline takeaway for this iteration
+### 6.5 Iteration 3.5 — root-cause fixes for Mm³ and long-table year-row
 
-Baseline lifted from **1/15 → 7/15** without any LLM call. The
-combination of `parse_value` magnitude/separator handling +
-line-scanning fallback + year-column awareness + per-KPI
-negative-token filtering covers the majority of the corpus's
-structural extraction problems. The remaining 8 cells split between
-LLM-territory disambiguation and a few page-ranking edge cases that
-would need iteration-4 investigation — but the baseline is now a
-genuine extractor, not just a comparison/diagnostic.
+After v3, two failures looked like clean code bugs (Eni water MISS,
+BP water wrong-year-column). The systematic-debugging four-phase
+process (`/superpowers:systematic-debugging`) was applied and both
+were resolved on first-try fixes.
+
+**Eni water MISS → 42 M m³ ✅** — Phase 1 added diagnostic
+instrumentation around `parse_value`. The Mm³ unit alias and the
+`(Mm3, m3): 1e6` conversion had been added in v3, but the line was
+still being rejected. Tracing showed `parse_value` has an
+`accepted_canonicals` filter (built from the per-KPI `unit_family`)
+that ran AFTER `canonicalize_unit` succeeded. The Mm³ canonical was
+`"Mm3"`, but `water_consumption.unit_family` listed only the
+m³/ML/kL forms. Adding `"Mm3"` and `"Mm³"` to the unit family closed
+the gap. (Fix in `config.py`; test
+`test_water_kpi_unit_family_accepts_mm3`.)
+
+**BP water wrong-year-column → 47.3 M m³ ✅** — Phase 1 dumped the
+±20 lines around BP's `Freshwater consumption` row. The year-row
+header sat at offset −14 from the data line; the previous search
+window was only −5 to +2. `_pick_year_column_value` now walks up to
+−25 lines (closest-above wins, naturally honouring multi-table
+pages where each sub-table has its own header). Magnitude is still
+preserved through ratio scaling. (Fix in `extractors/baseline.py`;
+test `test_pick_year_column_searches_far_above_in_long_table`.)
+
+The asymmetric failure (BP scope_1 at offset −2 worked, BP water at
+offset −14 didn't, *same page*) was the tell that the issue was
+distance-from-header, not content.
+
+### 6.6 Headline numbers (v6)
+
+| Run | Extractor | KPI | TP | FP | FN | Precision | Recall | F1 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **v6** | **baseline** | **scope_1** | **1** | **2** | **2** | **0.33** | **0.33** | **0.33** |
+| **v6** | **baseline** | **total_energy** | **4** | **1** | **0** | **0.80** | **1.00** | **0.89** |
+| **v6** | **baseline** | **water** | **4** | **1** | **0** | **0.80** | **1.00** | **0.89** |
+
+Aggregate baseline: **9 TP / 15** (up from 7 in v3, 1 in v2). Macro-F1 ≈ **0.70**.
+LLM half remains 0/15 — credits still exhausted; the cache-key fix and
+prompt-v2 are wired but unobservable until credits return.
+
+### 6.7 What's still wrong (v6)
+
+The 6 remaining errors split cleanly:
+
+**Retrieval-layer issues (3 cells)** — the right page is not the
+top-ranked page:
+- Eni scope_1: gold 28.4 M on page 166 (line `Direct GHG emissions
+  (Scope 1) (MtCOeq.) 28.4 26.2 ...`); baseline picks page 167's
+  similar-looking line with 18.6 (a different scope/segment).
+- Enel total_energy: gold 168.59 M on page 150 (line `In 2025,
+  energy consumption totaled 168.59 TWh`); baseline picks page 76
+  ("between 70,000 MWh and 150,000 MWh" — price-tier reference).
+- Iberdrola scope_1: gold 5,246,890 on page 48 (raw row
+  `2 5,179,674 5,246,890 1.3 N/AV.` with no nearby label). MISS,
+  because no line on a top page has both the keywords and a number
+  in the plausible range.
+
+**Inherently LLM-territory (3 cells)**:
+- Shell scope_1: gold 69 M is the ESRS-aligned figure (consolidated
+  + operated non-consolidated entities). No single line contains
+  the consolidated total — it's an aggregation of multiple rows.
+- Shell water: gold 26 M m³ is the corporate consumption total,
+  but the line `around 72 million cubic metres of fresh water
+  consumed` (a specific facility narrative) outscores it.
+- Enel scope_1: gold 18.95 M; baseline picks `... 2 and 3) totaled
+  62.53 MtCO2eq` (sum of scopes 1+2+3 across the line break — the
+  "scopes 1, 2" negative-token doesn't catch the wrapped form).
+
+### 6.8 Headline takeaway
+
+Baseline now works. **Total energy and water are at F1 ≈ 0.89 each**,
+i.e. 4/5 cells correct, no false negatives — exactly the structural
+performance the iteration-2 + iteration-3 work targeted.
+**Scope 1 stays at F1 ≈ 0.33** because all 4 of its remaining
+failures are either retrieval-ranking issues or LLM-territory
+aggregation problems that no amount of regex can solve. The
+remaining theoretical ceiling for the baseline-only path on this
+corpus is probably ~10–11/15; getting beyond that needs the LLM
+half to come back online or a different retrieval strategy
+(see §6.7's three retrieval-layer cells).
