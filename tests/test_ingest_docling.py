@@ -62,6 +62,17 @@ def test_parse_with_docling_returns_none_on_empty_pages(tmp_path):
     assert report is None
 
 
+def test_parse_with_docling_skips_oversized_files(tmp_path):
+    """Files above the size threshold should skip Docling immediately."""
+    pdf = tmp_path / "big_2024.pdf"
+    pdf.write_bytes(b"x" * (16 * 1024 * 1024))  # 16 MB > 15 MB threshold
+    converter = MagicMock()
+    with patch("nlp_esg.ingest_docling.DocumentConverter", return_value=converter):
+        report = parse_with_docling(pdf)
+    assert report is None
+    converter.convert.assert_not_called()
+
+
 def test_parse_with_docling_returns_none_when_majority_pages_empty(tmp_path):
     """If Docling OOMs partway through, most pages come back empty.
     The quality check should reject the result so the caller falls back."""

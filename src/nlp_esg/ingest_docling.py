@@ -14,6 +14,9 @@ except ImportError:  # pragma: no cover - import-time fallback
     DocumentConverter = None  # type: ignore[assignment]
 
 
+_DOCLING_MAX_FILE_BYTES = 15 * 1024 * 1024  # 15 MB
+
+
 def parse_with_docling(path: Path) -> "ParsedReport | None":
     """Parse a PDF with Docling. Return None on any failure so the caller can fall back."""
     # Imported lazily to avoid a circular import with nlp_esg.ingest.
@@ -21,6 +24,21 @@ def parse_with_docling(path: Path) -> "ParsedReport | None":
 
     if DocumentConverter is None:
         log.warning("docling not installed; caller should fall back")
+        return None
+
+    # Docling's layout model has unbounded memory growth on long PDFs and
+    # OOMs (std::bad_alloc) past ~28 pages on bigger reports. Skip up-front
+    # for oversized inputs so the dispatcher falls back without burning
+    # 5-10 minutes per file.
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0
+    if size > _DOCLING_MAX_FILE_BYTES:
+        log.warning(
+            "skipping docling for %s (%.1f MB > %.1f MB threshold)",
+            path.name, size / 1e6, _DOCLING_MAX_FILE_BYTES / 1e6,
+        )
         return None
 
     try:
