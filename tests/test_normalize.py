@@ -200,6 +200,30 @@ def test_parse_value_millionm3_token_split():
     assert out == (53_600_000.0, "m3")
 
 
+def test_water_kpi_unit_family_accepts_mm3():
+    """The water KPI's registered unit_family must include Mm3 so the line
+    `Water consumption(a) (Mm3) 42 ...` (from Eni's report) is accepted."""
+    from nlp_esg.config import KPIS
+    out = parse_value(
+        "Water consumption(a) (Mm3) 42 12 45 9",
+        kpi_unit_family=KPIS["water_consumption"]["unit_family"],
+    )
+    assert out is not None, "water unit_family rejects Mm3 — add it"
+    assert out[1] == "Mm3"
+
+
+def test_parse_value_mm3_in_water_unit_family():
+    """Eni-style 'Water consumption(a) (Mm3) 42 ...' should parse Mm3 as a unit
+    when it is declared in the KPI's unit_family. Regression: Mm3 alias was
+    added to _UNIT_ALIASES and conversions but missing from water unit_family,
+    so accepted_canonicals filtered it out."""
+    out = parse_value(
+        "Water consumption(a) (Mm3) 42 12 45 9",
+        kpi_unit_family=["m3", "Mm3"],
+    )
+    assert out == (42.0, "Mm3")
+
+
 def test_parse_value_dot_zero_zero_zero_thousand():
     """Enel pattern: '.000 m3 32,141' represents 'thousand m3' = 32,141 × 1000."""
     out = parse_value(

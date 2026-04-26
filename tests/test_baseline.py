@@ -74,6 +74,34 @@ def test_baseline_not_reported_when_nothing_matches(fake_embed):
     assert result.unit is None
 
 
+def test_pick_year_column_searches_far_above_in_long_table():
+    """Year-row 14 lines above the data-line should still be detected.
+    Reproduces BP water case: the 'Freshwater consumption' row sat near the
+    bottom of a long table whose year header was 14 lines above."""
+    from nlp_esg.extractors.baseline import BaselineExtractor
+
+    page_lines = [
+        "| Metric | Unit | 2021 | 2022 | 2023 | 2024 | 2025 |",
+        "|--------|------|------|------|------|------|------|",
+    ]
+    # 13 filler rows so the data line sits at index 15 (offset -15 from header).
+    for _ in range(13):
+        page_lines.append("| filler | x | 1 | 2 | 3 | 4 | 5 |")
+    page_lines.append(
+        "| Freshwater consumption | million m3 | 53.6 | 51.7 | 47.4 | 46.5 | 47.3 |"
+    )
+
+    # parse_value would have returned 53.6 × 1e6 = 53,600,000 for this line.
+    raw = 53_600_000.0
+    result = BaselineExtractor._pick_year_column_value(
+        page_lines, line_idx=15, data_line=page_lines[15], raw_value=raw,
+    )
+    # Most recent year 2025 = col_idx 4. Last 5 of parsed numbers = data values.
+    # Pick parsed[4] = 47.3. raw * (47.3/53.6) ≈ 47,300,000.
+    assert result is not None, "year row >5 lines above was not found"
+    assert abs(result - 47_300_000) < 100
+
+
 def test_baseline_rejects_truly_out_of_range(fake_embed):
     weird = {
         "company": "acme", "report_year": 2024,

@@ -50,7 +50,7 @@ KPIS: dict[str, dict] = {
             "Water consumption m3",
             "Total water consumed",
         ],
-        "unit_family": ["m3", "m³", "ML", "megaliters", "megalitres", "kL", "thousand m3", "cubic metres"],
+        "unit_family": ["m3", "m³", "ML", "megaliters", "megalitres", "kL", "thousand m3", "cubic metres", "Mm3", "Mm³"],
         "canonical_unit": "m3",
         "plausible_range": (1e1, 1e10),
         "negative_tokens": ["withdrawal", "withdrawn", "abstracted", "discharge", "discharged", "intake", "recycled", "reclaimed", " net ", "discontinued"],

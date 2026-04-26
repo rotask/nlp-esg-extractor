@@ -398,7 +398,12 @@ class BaselineExtractor(Extractor):
 
         year_re = re.compile(r"\b(20[1-3]\d)\b")
         # Search above first (year-rows are header rows), then below.
-        for offset in (-1, -2, -3, -4, -5, 1, 2):
+        # Range goes deep — long tables can have a header 20+ lines above the
+        # last data row (BP datasheet has up to ~14 rows per sub-table).
+        # Iteration order matters: closest above wins (the most-recent header
+        # in a multi-table page applies to the data rows below it).
+        offsets = [-d for d in range(1, 26)] + [1, 2, 3]
+        for offset in offsets:
             idx = line_idx + offset
             if not (0 <= idx < len(page_lines)):
                 continue
