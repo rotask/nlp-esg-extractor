@@ -11,7 +11,7 @@ from anthropic import Anthropic
 from nlp_esg.config import ANTHROPIC_MODEL, CACHE_DIR, KPIS
 from nlp_esg.extractors.base import Extractor
 from nlp_esg.normalize import canonicalize_unit, normalize_co2, to_canonical_value
-from nlp_esg.retrieval import embed_texts, rank_pages_cosine
+from nlp_esg.retrieval import embed_texts, rank_pages_cosine, rank_pages_hybrid
 from nlp_esg.types import KPIExtraction
 
 log = logging.getLogger(__name__)
@@ -76,19 +76,23 @@ class LLMExtractor(Extractor):
         return self._client
 
     def _build_context(
-        self, report: Any, kpi_query: str, kpi_unit_family: list[str] | None = None
+        self,
+        report: Any,
+        kpi_query: str,
+        kpi_unit_family: list[str] | None = None,
+        kpi_queries: list[str] | None = None,
     ) -> str:
-        """Return full page text + tables for top-K pages, ranked by max
-        sentence/table-header cosine similarity, with a small boost for pages
-        whose text contains an accepted unit token.
+        """Return full page text + tables for top-K pages, ranked by hybrid
+        BM25 + cosine retrieval across multiple KPI query phrasings.
 
-        Page-level retrieval avoids the brittle splits pdfplumber introduces
-        (subscript artefacts, two-column merges, micro-table fragmentation):
-        the actual KPI value usually lives in the page text, not in clean
-        sentences or normalized table rows.
+        Falls back to single-query cosine retrieval when no kpi_queries are
+        provided (e.g. older callers that only pass kpi_query).
         """
-        query_emb = embed_texts([kpi_query])[0]
-        ranked = rank_pages_cosine(report, query_emb, unit_tokens=kpi_unit_family)
+        if kpi_queries:
+            ranked = rank_pages_hybrid(report, list(kpi_queries))
+        else:
+            query_emb = embed_texts([kpi_query])[0]
+            ranked = rank_pages_cosine(report, query_emb, unit_tokens=kpi_unit_family)
         top_pages = ranked[:12]
         top_page_nums = {pn for pn, _ in top_pages}
 
@@ -118,7 +122,12 @@ class LLMExtractor(Extractor):
         kpi = KPIS[kpi_key]
         flags: list[str] = []
 
-        context = self._build_context(report, kpi["query"], kpi["unit_family"])
+        context = self._build_context(
+            report,
+            kpi["query"],
+            kpi_unit_family=kpi["unit_family"],
+            kpi_queries=kpi.get("queries"),
+        )
 
         user_prompt = (
             f"KPI to extract: {kpi['query']}\n"

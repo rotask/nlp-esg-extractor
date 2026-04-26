@@ -138,3 +138,34 @@ def test_llm_gives_up_after_max_retries(indexed_stub):
 
     assert result.value is None
     assert "api_error" in result.flags
+
+
+def test_llm_build_context_uses_multi_query_hybrid(monkeypatch):
+    """LLMExtractor._build_context should consult kpi['queries'] (plural)."""
+    from nlp_esg.extractors.llm import LLMExtractor
+    captured = {}
+
+    def fake_hybrid(report, queries, **kw):
+        captured["queries"] = list(queries)
+        return [(p["page_num"], 1.0) for p in report["pages"]]
+
+    monkeypatch.setattr("nlp_esg.extractors.llm.rank_pages_hybrid", fake_hybrid)
+
+    indexed = {
+        "company": "x", "report_year": 2024, "parser": "pdfplumber",
+        "pages": [{"page_num": 1, "text": "page one"}],
+        "sentences": [], "table_headers": [], "tables": [],
+    }
+    ext = LLMExtractor()
+    ctx = ext._build_context(
+        indexed,
+        kpi_query="Scope 1 direct greenhouse gas emissions",
+        kpi_unit_family=["tCO2e"],
+        kpi_queries=[
+            "Total gross Scope 1 GHG emissions",
+            "Scope 1 (direct) emissions",
+        ],
+    )
+    assert "Total gross Scope 1 GHG emissions" in captured["queries"]
+    assert "Scope 1 (direct) emissions" in captured["queries"]
+    assert "page one" in ctx
