@@ -47,3 +47,26 @@ def test_all_kpi_columns_present():
     extractions = [_e("acme", 2024, "scope_1_emissions", 100)]
     df = build_comparison_table(extractions, extractor="baseline")
     assert set(df.columns) >= {"scope_1_emissions", "total_energy_consumption", "water_consumption"}
+
+
+def test_build_run_comparison_joins_two_runs(tmp_path):
+    from nlp_esg.compare import build_run_comparison
+
+    (tmp_path / "v1").mkdir()
+    (tmp_path / "v2").mkdir()
+    pd.DataFrame([
+        {"company": "bp", "report_year": 2024, "kpi": "scope_1_emissions",
+         "extractor": "llm", "value": 33.7e6, "unit": "tCO2e",
+         "reporting_year": 2024, "run_tag": "v1"},
+    ]).to_csv(tmp_path / "v1" / "extractions.csv", index=False)
+    pd.DataFrame([
+        {"company": "bp", "report_year": 2024, "kpi": "scope_1_emissions",
+         "extractor": "llm", "value": 33.7e6, "unit": "tCO2e",
+         "reporting_year": 2024, "run_tag": "v2"},
+    ]).to_csv(tmp_path / "v2" / "extractions.csv", index=False)
+
+    df = build_run_comparison(["v1", "v2"], runs_dir=tmp_path)
+    assert ("bp", "scope_1_emissions") in {(r["company"], r["kpi"]) for _, r in df.iterrows()}
+    cols = set(df.columns)
+    assert "v1_llm_value" in cols
+    assert "v2_llm_value" in cols
