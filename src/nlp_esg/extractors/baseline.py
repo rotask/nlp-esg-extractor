@@ -272,7 +272,7 @@ class BaselineExtractor(Extractor):
         kpi_key: str,
         unit_family_canonicals: set[str],
         flags: list[str],
-        top_n_pages: int = 8,
+        top_n_pages: int = 25,
         min_kw_score: float = 0.15,
     ) -> KPIExtraction | None:
         """Page-level line scanner.

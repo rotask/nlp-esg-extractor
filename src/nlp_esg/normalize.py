@@ -9,15 +9,18 @@ import re
 # ---------------------------------------------------------------------------
 _CO2_INLINE = re.compile(r"CO\s+2\s+eq?", re.IGNORECASE)        # "CO 2 e", "CO 2 eq"
 _CO2_SUFFIX_AFTER = re.compile(r"COe\s*q?\s*2", re.IGNORECASE)  # "COe2", "COeq 2"
-# "MtCO [anything on same line] \n 2eq?" — subscript digit on next line
+# "MtCO [anything on same line] \n 2eq?" — subscript digit on next line.
+# The (?<![A-Za-z]) lookbehind prevents the regex from matching 'co' inside
+# words like 'Scope' — without it, the greedy [^\n]* would eat the rest of
+# the line and inject '2eq' inside the word, corrupting both ends.
 _CO2_NEXT_LINE = re.compile(
-    r"((?:M[tT]|[kKgG][tT]|[tT])?CO)([^\n]*)\n\s*(2eq?)",
+    r"(?<![A-Za-z])((?:M[tT]|[kKgG][tT]|[tT])?CO)([^\n]*)\n\s*(2eq?)",
     re.IGNORECASE,
 )
 # BP pattern: "MtCOe [numbers]\n2\n" — the unit token already contains the trailing
 # "e" and the subscript "2" is alone on its own line.
 _CO2_LONE_SUBSCRIPT = re.compile(
-    r"(?P<unit>(?:M[tT]|[kKgG][tT]|[tT])?CO)e([^\n]*)\n\s*2(?=\s*\n)"
+    r"(?<![A-Za-z])(?P<unit>(?:M[tT]|[kKgG][tT]|[tT])?CO)e([^\n]*)\n\s*2(?=\s*\n)"
 )
 
 

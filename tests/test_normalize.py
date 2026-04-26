@@ -167,6 +167,25 @@ def test_lone_subscript_2_on_own_line():
     assert "MtCOe " not in out
 
 
+def test_normalize_co2_does_not_corrupt_scope_word():
+    """Regression: the _CO2_NEXT_LINE regex matched 'co' in 'Scope' and
+    inserted '2eq' inside the word, producing 'Sco2eqpe'. The fix anchors
+    the pattern with a non-letter lookbehind so 'CO' must stand alone."""
+    raw = "Total gross Scope 1 GHG emissions(1) MtCO\n2eq 18.95 20.20"
+    out = normalize_co2(raw)
+    assert "Sco2eq" not in out, f"Scope corrupted: {out!r}"
+    assert "Scope 1 GHG emissions" in out
+    assert "MtCO2eq" in out
+    assert "18.95" in out
+
+
+def test_normalize_co2_still_fixes_split_unit_with_no_corruption():
+    """The legitimate fix (split unit token across a line break) still works."""
+    raw = "MtCO\n2eq 18.95"
+    out = normalize_co2(raw)
+    assert out == "MtCO2eq 18.95"
+
+
 def test_lone_subscript_2_does_not_corrupt_normal_text():
     """A '2' on its own line that is NOT preceded by a CO unit must not change."""
     raw = "Methodology section.\n2\nThis paragraph discusses scope 1."
