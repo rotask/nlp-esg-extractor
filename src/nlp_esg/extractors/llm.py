@@ -104,6 +104,7 @@ class LLMExtractor(Extractor):
         retry_base_delay: float = 1.0,
         provider: str | None = None,
         min_call_interval_s: float | None = None,
+        prompt_log_dir: Path | None = None,
     ):
         if provider is None:
             provider = os.environ.get("LLM_PROVIDER", "anthropic")
@@ -127,6 +128,10 @@ class LLMExtractor(Extractor):
         self.min_call_interval_s = min_call_interval_s
         self._last_call_time = 0.0
         self._client: Anthropic | None = None
+        self.prompt_log_dir = prompt_log_dir
+        # Populated by _build_context as a side-effect so extract() can log
+        # the retrieved page numbers without re-running the ranking.
+        self._last_top_pages: list[int] = []
 
     @property
     def client(self) -> Anthropic:
@@ -169,6 +174,7 @@ class LLMExtractor(Extractor):
         # would dilute the model's focus on long contexts.
         top_pages = ranked[:16]
         top_page_nums = {pn for pn, _ in top_pages}
+        self._last_top_pages = [pn for pn, _ in top_pages]
 
         pages_by_num = {p["page_num"]: p for p in report["pages"]}
         parts: list[str] = []
@@ -212,10 +218,12 @@ class LLMExtractor(Extractor):
         cache_key = self._cache_key(kpi_key, user_prompt, _SYSTEM_PROMPT)
         cache_path = CACHE_DIR / "llm" / f"{cache_key}.json"
         tool_input: dict | None = None
+        from_cache = False
         if cache_path.exists():
             try:
                 with cache_path.open(encoding="utf-8") as f:
                     tool_input = json.load(f)
+                    from_cache = True
             except (json.JSONDecodeError, OSError) as e:
                 log.warning("corrupt llm cache at %s (%s); refetching", cache_path, e)
         if tool_input is None:
@@ -224,6 +232,16 @@ class LLMExtractor(Extractor):
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 with cache_path.open("w", encoding="utf-8") as f:
                     json.dump(tool_input, f)
+
+        # Reproducibility log (facilitator request): write per-(company,kpi)
+        # JSON capturing exactly which pages were retrieved, the system+user
+        # prompt, and the tool response. Written even on api_error so the
+        # absence of a tool_response is itself diagnostic.
+        if self.prompt_log_dir is not None:
+            self._write_prompt_log(
+                report, kpi_key, user_prompt, _SYSTEM_PROMPT,
+                tool_input, from_cache,
+            )
 
         if tool_input is None:
             return self._not_reported(report, kpi_key, flags=["api_error"])
@@ -357,6 +375,33 @@ class LLMExtractor(Extractor):
                     return dict(args)
         log.warning("Gemini response had no function_call for %s", kpi_key)
         return None
+
+    def _write_prompt_log(
+        self, report: Any, kpi_key: str, user_prompt: str,
+        system_prompt: str, tool_response: dict | None, from_cache: bool,
+    ) -> None:
+        """Persist the exact prompt + retrieved pages + tool response so the
+        baseline-vs-LLM comparison is reproducible from disk."""
+        try:
+            self.prompt_log_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "company": report["company"],
+                "report_year": report["report_year"],
+                "kpi": kpi_key,
+                "provider": self.provider,
+                "model": self.model,
+                "from_cache": from_cache,
+                "retrieved_pages": list(self._last_top_pages),
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "tool_response": tool_response,
+            }
+            fname = f"{report['company']}_{report['report_year']}_{kpi_key}.json"
+            with (self.prompt_log_dir / fname).open("w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+        except OSError as e:
+            log.warning("failed to write prompt log for %s/%s: %s",
+                        report.get("company"), kpi_key, e)
 
     def _not_reported(self, report: Any, kpi_key: str, flags: list[str]) -> KPIExtraction:
         return KPIExtraction(

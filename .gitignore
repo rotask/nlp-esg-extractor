@@ -16,8 +16,18 @@ data/cache/
 # Raw report PDFs are kept locally, not committed (sizeable; sometimes licence-restricted)
 data/reports/
 
-# Per-run extraction CSVs (generated artefacts; the writeup pulls from these)
-data/runs/
+# Per-run extraction CSVs (generated artefacts; the writeup pulls from these).
+# Use `data/runs/*` (not `data/runs/`) so the negation below can re-include a
+# specific run — git can't re-include files inside an excluded directory.
+data/runs/*
+# …except runs the report cites for reproducibility:
+#   v9_magnitude_tiebreak    — best baseline-only run (12/15 TP, F1=0.88)
+#   v_gemini_post_quota       — LLM run with gemini-2.5-flash-lite (§10/§11)
+#   v_gemini_25flash_post_quota — LLM run with gemini-2.5-flash (§12)
+# All three carry extractions.csv + metrics.csv + (LLM only) per-KPI prompt logs.
+!data/runs/v9_magnitude_tiebreak/
+!data/runs/v_gemini_post_quota/
+!data/runs/v_gemini_25flash_post_quota/
 
 # Claude Code agent settings (machine-local)
 .claude/

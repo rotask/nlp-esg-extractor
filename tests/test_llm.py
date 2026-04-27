@@ -341,6 +341,54 @@ def test_gemini_provider_retries_on_exception():
     assert fake_client.models.generate_content.call_count == 2
 
 
+def test_llm_writes_prompt_log_when_dir_set(indexed_stub, tmp_path):
+    """When prompt_log_dir is set, extract() writes a JSON log per (company, kpi)
+    capturing the system_prompt, user_prompt, retrieved_pages, and tool_response.
+    Required for the facilitator's reproducibility ask."""
+    import json as _json
+    log_dir = tmp_path / "llm_prompts"
+    with patch("nlp_esg.extractors.llm.Anthropic") as mock_cls:
+        client = MagicMock()
+        client.messages.create.return_value = _valid_response()
+        mock_cls.return_value = client
+
+        ext = LLMExtractor(prompt_log_dir=log_dir)
+        # _build_context is patched, so populate _last_top_pages manually —
+        # we are unit-testing the logging side-effect, not retrieval.
+        ext._last_top_pages = [5, 6, 7]
+        with patch.object(ext, "_build_context", return_value="context"):
+            ext.extract(indexed_stub, "scope_1_emissions")
+
+    files = list(log_dir.glob("*.json"))
+    assert len(files) == 1, f"expected 1 prompt-log file, got {[f.name for f in files]}"
+    data = _json.loads(files[0].read_text(encoding="utf-8"))
+    for key in ("company", "report_year", "kpi", "model", "provider",
+                "system_prompt", "user_prompt", "retrieved_pages", "tool_response"):
+        assert key in data, f"missing key {key!r} in log; got {sorted(data)}"
+    assert data["company"] == "acme"
+    assert data["kpi"] == "scope_1_emissions"
+    assert data["retrieved_pages"] == [5, 6, 7]
+    assert data["tool_response"]["value"] == pytest.approx(45678.0)
+    assert "ESG sustainability reports" in data["system_prompt"]
+
+
+def test_llm_no_prompt_log_when_dir_unset(indexed_stub, tmp_path):
+    """When prompt_log_dir is None (default), no llm_prompts/ dir is created."""
+    with patch("nlp_esg.extractors.llm.Anthropic") as mock_cls:
+        client = MagicMock()
+        client.messages.create.return_value = _valid_response()
+        mock_cls.return_value = client
+        ext = LLMExtractor()  # no prompt_log_dir
+        with patch.object(ext, "_build_context", return_value="context"):
+            ext.extract(indexed_stub, "scope_1_emissions")
+    # The autouse cache fixture creates tmp_path/cache; we just assert that
+    # no llm_prompts/ dir was made and no stray .json files exist outside cache/.
+    assert not (tmp_path / "llm_prompts").exists()
+    stray_json = [p for p in tmp_path.rglob("*.json")
+                  if "cache" not in p.parts]
+    assert stray_json == []
+
+
 def test_llm_build_context_uses_multi_query_hybrid(monkeypatch):
     """LLMExtractor._build_context should consult kpi['queries'] (plural)."""
     from nlp_esg.extractors.llm import LLMExtractor

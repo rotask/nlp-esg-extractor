@@ -32,10 +32,12 @@ def load_indexed_reports(reports_dir: Path = REPORTS_DIR) -> list:
 
 
 def run_extraction(
-    indexed_reports: Iterable, include_llm: bool = True
+    indexed_reports: Iterable,
+    include_llm: bool = True,
+    prompt_log_dir: Path | None = None,
 ) -> list[KPIExtraction]:
     baseline = BaselineExtractor()
-    llm = LLMExtractor() if include_llm else None
+    llm = LLMExtractor(prompt_log_dir=prompt_log_dir) if include_llm else None
 
     out: list[KPIExtraction] = []
     for report in indexed_reports:
@@ -97,7 +99,10 @@ def main(run_tag: str = "v2_docling") -> None:
         log.error("No reports found in %s", REPORTS_DIR)
         return
 
-    extractions = run_extraction(indexed, include_llm=True)
+    prompt_log_dir = RUNS_DIR / run_tag / "llm_prompts"
+    extractions = run_extraction(
+        indexed, include_llm=True, prompt_log_dir=prompt_log_dir,
+    )
     for e in extractions:
         e.run_tag = run_tag
 

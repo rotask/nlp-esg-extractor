@@ -1,0 +1,32 @@
+company,report_year,kpi,value,unit,reporting_year,source_snippet,source_page,confidence,extractor,flags,run_tag
+bp,2024,scope_1_emissions,33700000.0,tCO2e,2024.0,line@page 6: | Scope 1 (direct) emissions l                                                      | MtCO2e    | 33.2    | 30.4    | 31.1    | 32.8    | 33.7    |,6.0,0.9642857142857143,baseline,[],v9_magnitude_tiebreak
+bp,2024,scope_1_emissions,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+bp,2024,total_energy_consumption,134448000.0,MWh,2024.0,"table@page 6: Energy consumption l z | 134,448",6.0,0.3685420187479871,baseline,[],v9_magnitude_tiebreak
+bp,2024,total_energy_consumption,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+bp,2024,water_consumption,47299999.99999999,m3,2024.0,line@page 9: | Freshwater consumption                                                   | millionm 3      | 53.6   | 51.7   | 47.4   | 46.5   | 47.3   |,9.0,1.1666666666666665,baseline,[],v9_magnitude_tiebreak
+bp,2024,water_consumption,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+enel,2024,scope_1_emissions,18950000.0,tCO2e,2024.0,line@page 147: Total gross Scope 1 GHG emissions(1) MtCO2eq 18.95 20.20 (1.25) -6.2%,147.0,1.0066666666666666,baseline,[],v9_magnitude_tiebreak
+enel,2024,scope_1_emissions,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+enel,2024,total_energy_consumption,168590000.0,MWh,2024.0,line@page 150: Total energy consumption (primary and final) TWh 168.59 170.52 (1.93) -1.1%,150.0,1.04,baseline,['out_of_range'],v9_magnitude_tiebreak
+enel,2024,total_energy_consumption,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+enel,2024,water_consumption,32141000.0,m3,2024.0,"line@page 286: Total water consumption .000 m3 32,141 30,881 1,260 4.1%",286.0,1.28,baseline,['out_of_range'],v9_magnitude_tiebreak
+enel,2024,water_consumption,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+eni,2024,scope_1_emissions,28400000.0,tCO2e,2024.0,line@page 166: Direct GHG emissions (Scope 1) (MtCO2eq.) 28.4 26.2 31.1 27.4 -9%,166.0,0.9199999999999999,baseline,['out_of_range'],v9_magnitude_tiebreak
+eni,2024,scope_1_emissions,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+eni,2024,total_energy_consumption,84399860.0,MWh,2024.0,"line@page 170: Total energy consumption(b) (MWh) 84,399,860 31,146,286 92,738,602 32,150,544",170.0,1.3,baseline,[],v9_magnitude_tiebreak
+eni,2024,total_energy_consumption,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+eni,2024,water_consumption,42000000.0,m3,2024.0,line@page 184: Water consumption(a) (Mm3) 42 12 45 9,184.0,0.8333333333333333,baseline,[],v9_magnitude_tiebreak
+eni,2024,water_consumption,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+iberdrola,2024,scope_1_emissions,,,,,,,baseline,[],v9_magnitude_tiebreak
+iberdrola,2024,scope_1_emissions,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+iberdrola,2024,total_energy_consumption,101572520.0,MWh,2024.0,"table@page 46: Total energy consumption (MWh) (calculated as the sum of lines 6, 7 and 11)
+- Continuing activities | 101,572,520",46.0,0.922671255280054,baseline,[],v9_magnitude_tiebreak
+iberdrola,2024,total_energy_consumption,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+iberdrola,2024,water_consumption,45642187.0,m3,2024.0,"line@page 58: Total water consumption - Continuing activities m3 45,642,187 55,354,884",58.0,1.3,baseline,[],v9_magnitude_tiebreak
+iberdrola,2024,water_consumption,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+shell,2024,scope_1_emissions,,,,,,,baseline,['out_of_range'],v9_magnitude_tiebreak
+shell,2024,scope_1_emissions,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+shell,2024,total_energy_consumption,269000000.0,MWh,2024.0,line@page 368: Total energy consumption [A] million MWh 269 289,368.0,1.3,baseline,[],v9_magnitude_tiebreak
+shell,2024,total_energy_consumption,,,,,,,llm,['api_error'],v9_magnitude_tiebreak
+shell,2024,water_consumption,72000000.0,m3,2024.0,line@page 383: around 72 million cubic metres of fresh water consumed was used Ensure good water quality Good water quality refers to water that meets the,383.0,0.96,baseline,[],v9_magnitude_tiebreak
+shell,2024,water_consumption,,,,,,,llm,['api_error'],v9_magnitude_tiebreak

@@ -1,0 +1,7 @@
+extractor,kpi,tp,fp,fn,tn,precision,recall,f1,coverage
+baseline,scope_1_emissions,3,0,2,0,1.0,0.6,0.7499999999999999,0.6
+baseline,total_energy_consumption,5,0,0,0,1.0,1.0,1.0,1.0
+baseline,water_consumption,4,1,0,0,0.8,1.0,0.888888888888889,1.0
+llm,scope_1_emissions,4,1,0,0,0.8,1.0,0.888888888888889,1.0
+llm,total_energy_consumption,3,1,1,0,0.75,0.75,0.75,0.8
+llm,water_consumption,1,4,0,0,0.2,1.0,0.33333333333333337,1.0

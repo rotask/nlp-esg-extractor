@@ -46,7 +46,7 @@ def test_main_persists_extractions_with_run_tag(tmp_path, monkeypatch):
     ]
     monkeypatch.setattr(
         pipeline, "run_extraction",
-        lambda r, include_llm=True: fake_extractions,
+        lambda r, include_llm=True, prompt_log_dir=None: fake_extractions,
     )
     monkeypatch.setattr(pipeline, "load_gold_labels", lambda: [])
     monkeypatch.setattr(pipeline, "RUNS_DIR", tmp_path)
