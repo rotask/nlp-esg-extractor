@@ -1,3 +1,12 @@
+"""PDF ingest dispatcher.
+
+`parse_pdf` tries Docling first via `ingest_docling.parse_with_docling`
+and falls back to the in-file `_parse_with_pdfplumber` on `None` /
+empty / quality-check failure. The `NLP_ESG_DISABLE_DOCLING=1` env
+var short-circuits Docling entirely. The on-disk pickle cache name
+includes the parser tag (`{company}_{year}_{parser}.pkl`) so v1
+(pdfplumber) and v2 (Docling) caches coexist and do not collide.
+"""
 from __future__ import annotations
 import logging
 import pickle

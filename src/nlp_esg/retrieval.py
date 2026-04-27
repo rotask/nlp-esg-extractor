@@ -1,3 +1,13 @@
+"""Hybrid page-level retrieval shared by both extractors.
+
+`build_index` adds per-sentence and per-table-header ClimateBERT
+embeddings to a `ParsedReport`, producing an `IndexedReport`. Pickled
+under `{company}_{year}_{parser}_indexed_{model}.pkl` so the
+expensive forward pass amortises across runs. `rank_pages_hybrid`
+combines reciprocal-rank fusion across multiple KPI query phrasings
+(cosine over sentence + table-header embeddings) with min-max-scaled
+BM25 over normalised page text, weighted by `alpha`.
+"""
 from __future__ import annotations
 import numpy as np
 

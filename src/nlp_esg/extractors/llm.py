@@ -1,3 +1,15 @@
+"""Tool-use LLM extractor with pluggable provider (Anthropic + Gemini).
+
+Builds context with the same `rank_pages_hybrid` retrieval as the
+baseline (top-16 pages + same-page tables, 4000-char-per-page cap),
+then forces a structured `record_kpi` tool call so the response is
+machine-parseable. Cache key is
+`sha256(model | kpi | system_prompt | user_prompt)`; the system prompt
+must be in the key so prompt-rule changes invalidate stale responses.
+When `prompt_log_dir` is set, every call writes a per-(company, kpi)
+JSON capturing the retrieved pages, full prompt, and tool response
+for reproducibility.
+"""
 from __future__ import annotations
 import hashlib
 import json

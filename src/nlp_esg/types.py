@@ -1,3 +1,11 @@
+"""Shared dataclasses and TypedDicts.
+
+`KPIExtraction` is the canonical row produced by both extractors and
+serialised into `extractions.csv`. The TypedDicts for `ParsedReport`,
+`IndexedReport`, `Page`, `TableEntry`, `Sentence`, and
+`TableHeaderEmb` live in `ingest.py` / `retrieval.py` next to the
+code that produces them.
+"""
 from __future__ import annotations
 from dataclasses import dataclass, field
 

@@ -1,3 +1,14 @@
+"""Unit canonicalisation and value extraction from raw PDF text.
+
+`canonicalize_unit` maps written units to a canonical form and
+`to_canonical_value` performs the cross-unit conversion (e.g. GWh ->
+MWh, ML -> m3). `parse_value` finds the first (number, unit) pair
+in free text matching a KPI's allowed unit family, handling forward,
+magnitude-reverse, and plain-reverse shapes plus magnitude words
+("1.2 million m3"). `normalize_co2` is a pre-pass that fixes
+pdfplumber's columnar artefacts ("CO 2 e", "MtCOe ... \\n2") so the
+embedder and the regexes see contiguous tokens.
+"""
 from __future__ import annotations
 import re
 

@@ -1,3 +1,13 @@
+"""Docling-backed PDF parser.
+
+Returns a `ParsedReport` (text + tables) or `None` so the caller can
+fall back to pdfplumber. Two escape hatches exist for environments
+where the C++ layout model OOMs/segfaults: a 15 MB file-size guard
+that skips Docling up-front for oversized inputs, and a post-parse
+"majority-empty pages" check that bails when fewer than half the
+pages have substantive text. The `NLP_ESG_DISABLE_DOCLING=1` env
+var short-circuits Docling entirely.
+"""
 from __future__ import annotations
 import logging
 import os

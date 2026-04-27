@@ -1,3 +1,10 @@
+"""Per-(extractor, kpi) precision / recall / F1 / coverage scoring.
+
+A prediction matches gold when value is within 1% relative tolerance
+(`EPSILON` from `config`) AND unit + reporting_year match exactly.
+Predictions and golds are paired on (company, report_year); a
+"not reported" row on both sides counts as a true negative.
+"""
 from __future__ import annotations
 from typing import Any
 

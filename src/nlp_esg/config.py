@@ -1,3 +1,12 @@
+"""KPI registry and project-wide constants.
+
+Defines the three target KPIs (Scope 1 emissions, total energy
+consumption, water consumption) with their query phrasings, allowed
+unit family, canonical unit, plausible-range guard, and per-KPI
+negative tokens used by the extractors. Also holds path constants
+under `data/` and model defaults read from the `EMBEDDING_MODEL` and
+`ANTHROPIC_MODEL` env vars.
+"""
 from __future__ import annotations
 import os
 from pathlib import Path

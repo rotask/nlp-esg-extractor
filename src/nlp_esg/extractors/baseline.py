@@ -1,10 +1,20 @@
+"""Deterministic baseline extractor.
+
+Two-stage pipeline. Table-first: rank table headers by cosine to the
+KPI query (>= `TAU_TABLE`), select the year column with `_find_year_col`,
+score candidate rows with a phrase + token-overlap metric, infer the
+unit from the cell / 'Unit' column / header / row label, canonicalise
+the value, and reject anything outside the KPI's plausible range or
+matching a `negative_tokens` entry. On miss, falls back to a page-level
+line scanner that uses the same `rank_pages_hybrid` retrieval and
+preserves magnitude when picking the most-recent year column.
+"""
 from __future__ import annotations
 import logging
 import re
 from typing import Any
 
-import numpy as np
-from nlp_esg.config import KPIS, TAU_TABLE, TOP_K_SENTENCES
+from nlp_esg.config import KPIS, TAU_TABLE
 from nlp_esg.extractors.base import Extractor
 from nlp_esg.normalize import (
     _NUMBER_RE,
@@ -14,7 +24,7 @@ from nlp_esg.normalize import (
     parse_value,
     to_canonical_value,
 )
-from nlp_esg.retrieval import cosine_sim, embed_texts, rank_pages_hybrid, top_k
+from nlp_esg.retrieval import cosine_sim, embed_texts, rank_pages_hybrid
 from nlp_esg.types import KPIExtraction
 
 log = logging.getLogger(__name__)

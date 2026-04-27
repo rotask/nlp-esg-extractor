@@ -1,3 +1,10 @@
+"""Side-by-side comparison DataFrames consumed by `pipeline.main()`.
+
+`build_comparison_table` pivots a list of `KPIExtraction` rows into a
+companies x KPIs grid (most-recent-year wins per company), and
+`build_run_comparison` joins multiple persisted runs on
+(company, report_year, kpi) so v1 vs v2 deltas can be inspected.
+"""
 from __future__ import annotations
 from pathlib import Path
 from typing import Iterable

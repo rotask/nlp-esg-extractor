@@ -1,3 +1,13 @@
+"""Top-level orchestration for the ESG KPI extraction run.
+
+`main` loads PDFs from `data/reports/`, builds an `IndexedReport` for
+each (parsed pages + sentence/table-header embeddings), runs both the
+deterministic baseline and the LLM extractor across every KPI,
+evaluates against `data/labels/gold_labels.csv`, and persists the
+artifacts under `data/runs/<run_tag>/` (`extractions.csv`,
+`metrics.csv`, plus per-(company, kpi) prompt logs in
+`llm_prompts/`).
+"""
 from __future__ import annotations
 import argparse
 import dataclasses
