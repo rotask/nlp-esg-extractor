@@ -39,7 +39,11 @@ def _docling_disabled() -> bool:
 try:
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.datamodel.pipeline_options import (
+        PdfPipelineOptions,
+        TableFormerMode,
+        TableStructureOptions,
+    )
     from docling.datamodel.accelerator_options import (
         AcceleratorDevice,
         AcceleratorOptions,
@@ -49,6 +53,8 @@ except ImportError:  # pragma: no cover - import-time fallback
     PdfFormatOption = None  # type: ignore[assignment]
     InputFormat = None  # type: ignore[assignment]
     PdfPipelineOptions = None  # type: ignore[assignment]
+    TableFormerMode = None  # type: ignore[assignment]
+    TableStructureOptions = None  # type: ignore[assignment]
     AcceleratorDevice = None  # type: ignore[assignment]
     AcceleratorOptions = None  # type: ignore[assignment]
 
@@ -135,15 +141,29 @@ def _resolve_accelerator_device() -> "AcceleratorDevice":
 
 
 def _make_pipeline_options() -> "PdfPipelineOptions":
-    """Lighter pipeline: no OCR, keep table structure (we need it for KPIs).
+    """Lighter pipeline tuned for borderless ESG datasheet tables.
 
-    Explicitly sets the accelerator device — Docling's `auto` is not always
-    reliable when the torch install briefly mismatches the driver. Override
-    with `NLP_ESG_DOCLING_DEVICE=cpu|cuda` if needed.
+    - `do_ocr=False`: every PDF in this corpus has a real text layer, OCR
+      would add latency without any KPI-recall benefit.
+    - `mode=ACCURATE`: TableFormer's accurate decoder handles tables that
+      have no visible row/column rules (BP datasheet, Shell ESRS tables) —
+      it predicts cell structure from layout context rather than relying
+      on grid lines. FAST sometimes collapses adjacent borderless cells.
+    - `do_cell_matching=True`: after structure prediction, match each cell
+      back against the PDF text layer instead of trusting the model's
+      reconstructed cell content. Critical for KPIs because exact
+      digit-by-digit values must come from the PDF, not the model.
+    - Accelerator device is set explicitly because Docling's `auto` is
+      unreliable when the torch install briefly mismatches the driver.
+      Override with `NLP_ESG_DOCLING_DEVICE=cpu|cuda` if needed.
     """
     opts = PdfPipelineOptions()
     opts.do_ocr = False
     opts.do_table_structure = True
+    opts.table_structure_options = TableStructureOptions(
+        mode=TableFormerMode.ACCURATE,
+        do_cell_matching=True,
+    )
     device = _resolve_accelerator_device()
     opts.accelerator_options = AcceleratorOptions(device=device)
     return opts
