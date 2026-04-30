@@ -40,19 +40,54 @@ try:
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.datamodel.accelerator_options import (
+        AcceleratorDevice,
+        AcceleratorOptions,
+    )
 except ImportError:  # pragma: no cover - import-time fallback
     DocumentConverter = None  # type: ignore[assignment]
     PdfFormatOption = None  # type: ignore[assignment]
     InputFormat = None  # type: ignore[assignment]
     PdfPipelineOptions = None  # type: ignore[assignment]
+    AcceleratorDevice = None  # type: ignore[assignment]
+    AcceleratorOptions = None  # type: ignore[assignment]
 
 
 _DOCLING_MAX_FILE_BYTES = 100 * 1024 * 1024  # 100 MB
 
-# Page batch size for the layout/structure pipeline. Tuned empirically on
-# a 16 GB laptop with ~2.5 GB free RAM headroom; exposed via env var so
-# memory-tight machines can drop to 10 and beefier ones can run 50+.
-_PAGE_BATCH_SIZE = int(os.environ.get("NLP_ESG_DOCLING_BATCH_SIZE", "20"))
+def _default_batch_size() -> int:
+    """20 on CPU, 10 on a small (≤8 GB) GPU.
+
+    The RTX 4050 / RTX 4060 8GB class throws std::bad_alloc on image-heavy
+    pages when running larger batches; halving the batch size stops the
+    bad_alloc without giving back too much GPU throughput.
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+            return 10 if vram_gb < 9 else 20
+    except Exception:
+        pass
+    return 20
+
+
+# Page batch size for the layout/structure pipeline. Defaults adapt to
+# device and VRAM; override via NLP_ESG_DOCLING_BATCH_SIZE for tuning.
+_PAGE_BATCH_SIZE = int(
+    os.environ.get("NLP_ESG_DOCLING_BATCH_SIZE", str(_default_batch_size()))
+)
+
+
+def _free_cuda_cache() -> None:
+    """Release any cached CUDA blocks back to the driver. No-op on CPU."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        pass
 
 
 def _count_pdf_pages(path: Path) -> int:
@@ -83,11 +118,34 @@ def _rss_mb() -> float:
         return 0.0
 
 
+def _resolve_accelerator_device() -> "AcceleratorDevice":
+    """Pick CUDA when available, else CPU. Honour NLP_ESG_DOCLING_DEVICE override."""
+    override = os.environ.get("NLP_ESG_DOCLING_DEVICE", "").strip().lower()
+    if override == "cpu":
+        return AcceleratorDevice.CPU
+    if override == "cuda":
+        return AcceleratorDevice.CUDA
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return AcceleratorDevice.CUDA
+    except Exception:
+        pass
+    return AcceleratorDevice.CPU
+
+
 def _make_pipeline_options() -> "PdfPipelineOptions":
-    """Lighter pipeline: no OCR, keep table structure (we need it for KPIs)."""
+    """Lighter pipeline: no OCR, keep table structure (we need it for KPIs).
+
+    Explicitly sets the accelerator device — Docling's `auto` is not always
+    reliable when the torch install briefly mismatches the driver. Override
+    with `NLP_ESG_DOCLING_DEVICE=cpu|cuda` if needed.
+    """
     opts = PdfPipelineOptions()
     opts.do_ocr = False
     opts.do_table_structure = True
+    device = _resolve_accelerator_device()
+    opts.accelerator_options = AcceleratorOptions(device=device)
     return opts
 
 
@@ -165,6 +223,7 @@ def parse_with_docling(path: Path) -> "ParsedReport | None":
         _collect_pages_and_tables(doc, batch_start, batch_end, pages, tables)
         del result, doc
         gc.collect()
+        _free_cuda_cache()
         log.info(
             "  batch %d-%d done; total pages=%d tables=%d RSS=%.0f MB",
             batch_start, batch_end, len(pages), len(tables), _rss_mb(),
