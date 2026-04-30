@@ -4,7 +4,7 @@ bp,2024,total_energy_consumption,134448000,MWh,2024,44,"134,448 GWh — Sustaina
 bp,2024,water_consumption,47300000,m3,2024,8,"47.3 million m³ — ESG Datasheet 2025"
 shell,2024,scope_1_emissions,69000000,tCO2e,2024,367,"69 million tonnes CO2e; includes consolidated (ESRS-aligned) + operated non-consolidated entities"
 shell,2024,total_energy_consumption,269000000,MWh,2024,366,"269 million MWh"
-shell,2024,water_consumption,26000000,m3,2024,383,"26 million m³"
+shell,2024,water_consumption,86000000,m3,2024,383,"86 million m³"
 enel,2024,scope_1_emissions,18950000,tCO2e,2024,147,"18.95 MtCO2e — pg. 147-148"
 enel,2024,total_energy_consumption,168590000,MWh,2024,150,"168.59 TWh"
 enel,2024,water_consumption,32141000,m3,2024,286,"32,141 thousand m³ — pg. 286-287"

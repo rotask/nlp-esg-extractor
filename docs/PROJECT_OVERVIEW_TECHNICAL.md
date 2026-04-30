@@ -334,7 +334,9 @@ table path fires:
 # Pick the best-matching table header.
 best_table = argmax cosine(table_headers, embed(query))
 
-# Find the year column (most recent year, not necessarily report_year).
+# Find the year column. Most-recent year wins, but candidates are
+# capped at report_year + 1 to skip future target columns
+# (Iberdrola tables have 2024/2025 alongside 2026/2040/2050).
 year_col_idx = _find_year_col(headers, report_year)
 
 # Score each row by query-overlap on row[0] (the row label).
@@ -347,6 +349,28 @@ if any(neg in row[0].lower() for neg in negative_tokens):
 # Parse value + unit, canonicalize.
 value, unit = parse_value(best_row[year_col_idx])
 ```
+
+**Year-column cap (post-fix).** `_find_year_col` originally returned
+the column index of the most-recent year matched by `\b(19|20)\d{2}\b`
+in the effective headers. Iberdrola's Scope 1 table mixes actual data
+years and milestone target years in the same row:
+
+```
+['Tons', '2024', '2025', '%\n25/24', '2026', '2040', '2050', 'Annual %\ntarget...']
+```
+
+Without a cap, `_find_year_col` returned the index of `"2050"` — and
+every data cell in that column is `"N/AV."`, so the table-path
+silently skipped every candidate row. The fix:
+
+```python
+if year > report_year + 1:
+    continue                       # skip target / milestone years
+```
+
+This recovers Iberdrola Scope 1 (gold = 5,246,890 tCO₂e) for the
+baseline. The cap also tolerates "2024-named files that cover FY2025"
+because the `+ 1` window still admits `2025` for `report_year=2024`.
 
 **Real example: BP `total_energy_consumption`.**
 
@@ -474,10 +498,23 @@ fragility.
   consumption". REJECT every value labelled "withdrawal",
   "withdrawn", "discharge", ...  This rule is STRICT — when in
   doubt between consumption and withdrawal, return null.
+  If the report distinguishes an "operational control" boundary
+  from a "financial control" (or "ESRS") boundary for water
+  (common in Shell), prefer the OPERATIONAL CONTROL figure —
+  that is the primary disclosure for water in oil & gas reports.
 - Multiply out magnitude prefixes yourself: ... NEVER write a unit
   that contains a magnitude word (never "million m3", "thousand
   m3", "Mm3", "million cubic metres").
 ```
+
+The boundary-preference clause was added because Shell's report has
+two water-consumption tables — page 385 (operational control,
+86 M m³, gold) and page 424 (financial control, 127 M m³,
+supplementary). The Scope 1 rule already says *"prefer the LARGER
+ESRS-aligned figure"*; the water rule's preference is the opposite
+direction (operational control is typically smaller and is the
+primary disclosure for water). Each KPI's preferred boundary lives
+in its own clause so they don't cross-contaminate.
 
 **Cache key.**
 
@@ -597,29 +634,52 @@ A model-tier change with **no code change** moved the LLM stream from
 8/15 → 12/15. This isolates how much of the residual error budget is
 model-quality vs algorithm.
 
+**Cross-model comparison (post-fix code, corrected gold).** Same
+retrieval, same prompt, same code — varying only `GEMINI_MODEL`:
+
+| Model | LLM TP | Notable failure modes (cells) |
+|---|---|---|
+| `gemini-2.5-flash` | 12 / 15 | shell water (financial control), eni water, shell energy |
+| `gemini-2.5-flash-lite` | 8 / 15 | + withdrawal-vs-consumption + 10⁹ magnitude slip |
+| `gemini-3-flash-preview` | 9 / 15 | sums components (eni water 42+12=54, iberdrola scope_1 5.247M+3.233M=8.48M, iberdrola energy continuing+discontinued); ignores operational-control rule |
+| `gemini-3.1-flash-lite-preview` | 6 / 15 | same as 3-flash-preview + 3 cells lost to API 503s; reverts shell scope_1 to 46M op-only |
+
+`gemini-2.5-flash` remains the most rule-compliant Gemini model on this
+task. The two preview models tested ignored explicit prompt rules
+(*"REJECT every value labelled withdrawal"*, *"prefer OPERATIONAL
+CONTROL"*, *"never sum components"*) that `2.5-flash` honours.
+
 ---
 
-## 4. Headline numbers — final committed state
+## 4. Headline numbers — final state (post-fix, corrected gold)
 
 | Run dir | Extractor | TP | F1 |
 |---|---|---|---|
-| `v9_magnitude_tiebreak/` | baseline | 12/15 | 0.88 |
-| `v_gemini_25flash_post_quota/` | LLM (gemini-2.5-flash) | 12/15 | 0.88 |
-| `v_gemini_post_quota/` | LLM (gemini-2.5-flash-lite) | 8/15 | 0.66 |
-| **best-of-either (baseline ∪ flash)** | — | **14/15** | **0.96** |
+| post-fix baseline (any of `v_corrected_gold/`, `v_after_fixes/`, `v_gemini31_lite/`) | baseline | 12/15 | 0.88 |
+| `v_corrected_gold/` | LLM (`gemini-2.5-flash`) | 12/15 | 0.88 |
+| `v_after_fixes/` | LLM (`gemini-3-flash-preview`) | 9/15 | 0.74 |
+| `v_gemini31_lite/` | LLM (`gemini-3.1-flash-lite-preview`) | 6/15 | 0.54 |
+| **best-of-either (baseline ∪ `gemini-2.5-flash`)** | — | **14/15** | **0.96** |
 
 | KPI | Baseline TP | LLM-flash TP | Best-of-either |
 |---|---|---|---|
-| scope_1_emissions | 3 / 5 | 5 / 5 | 5 / 5 |
+| scope_1_emissions | 4 / 5 | 5 / 5 | 5 / 5 |
 | total_energy_consumption | 5 / 5 | 4 / 5 | 5 / 5 |
-| water_consumption | 4 / 5 | 3 / 5 | 4 / 5 |
+| water_consumption | 3 / 5 | 3 / 5 | 4 / 5 |
 | **total** | **12 / 15** | **12 / 15** | **14 / 15** |
 
-The single unrecovered cell is **Shell water (gold = 26 M m³)**.
-Inherent corpus limit — the value lives in an infographic on page 122
-that pdfplumber returns as zero text characters. Both extractors pick
-narrative lines (`"around 72 million cubic metres"` baseline,
-`127M` LLM operational-control boundary) instead.
+The baseline gain (scope_1 3/5 → 4/5) comes from the year-column cap
+fix in `_find_year_col` — Iberdrola scope_1 is now baseline-extractable.
+Water dropped 4/5 → 3/5 because the corrected gold (Shell water 26 →
+86 M m³) is no longer matched by the baseline's 72 M narrative line.
+
+The single unrecovered cell is **Shell water (gold = 86 M m³,
+operational-control boundary)**. The data IS extractable — Shell publishes
+two boundary-tagged tables (`page 385: 86 M (operational)`,
+`page 424: 127 M (financial)`). The baseline picks a narrative sentence
+on page 383 (`"around 72 million cubic metres"`); `gemini-2.5-flash` picks
+the financial-control table. This is a Bucket-B disambiguation failure,
+not a corpus limit.
 
 ---
 
@@ -652,14 +712,35 @@ Right page in context, wrong cell picked. Sub-types:
 
 - **Definition ambiguity (rule violation).** Smaller LLMs treat the
   withdrawal-vs-consumption rule as a soft preference. Flash-lite hit
-  this on 4/5 water cells. Flash fixed 3/4. Baseline avoids it via
-  per-KPI `negative_tokens`.
-- **Sub-total selection (ESRS vs operational control).** Shell's report
-  has 46Mt (consolidated) and 69Mt (ESRS-aligned). Gold = 69. The
-  baseline can't reach 69 because no single line says it; the LLM only
-  picks it with a sufficiently capable model.
-- **Wrong year column.** Mitigated by `_pick_year_column_value`'s
-  ±25-line search and ratio-scaling for magnitude preservation.
+  this on 4/5 water cells. Flash fixed 3/4. The two preview models
+  (`gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`) regressed
+  on this: the latter returned Iberdrola water as
+  `1,274,971,000 m³` from a row literally labelled
+  *"Total water withdrawal"*. Baseline avoids it via per-KPI
+  `negative_tokens`.
+- **Sub-total selection (ESRS vs operational control, Scope 1).**
+  Shell's report has 46Mt (consolidated) and 69Mt (ESRS-aligned).
+  Gold = 69. The baseline can't reach 69 because no single line says
+  it; the LLM only picks it with a sufficiently capable model.
+- **Boundary disambiguation (water).** Shell publishes two
+  water-consumption tables — operational control on page 385
+  (86 M m³, the primary disclosure) and financial control on page 424
+  (127 M m³). The system prompt was extended with an explicit
+  "prefer OPERATIONAL CONTROL" rule for water, but the preview models
+  tested still picked 127. Per-KPI scoping prevents the Scope 1
+  "prefer larger" instruction from leaking onto water.
+- **Sum-of-components.** `gemini-3-flash-preview` and
+  `gemini-3.1-flash-lite-preview` repeatedly return component sums
+  instead of pre-computed totals: Eni water `Operated: 42 + not
+  operated: 12 → 54`; Iberdrola scope_1 `Continuing 5,246,890 +
+  Discontinued 3,233,218 → 8,480,108`. The system prompt explicitly
+  forbids this (*"never guess or infer from breakdowns if there is no
+  consolidated total"*); `gemini-2.5-flash` honours the rule, the
+  preview models ignore it.
+- **Wrong year column.** Mitigated by two fixes:
+  `_pick_year_column_value`'s ±25-line search + ratio-scaling for
+  magnitude preservation, and the new `_find_year_col` cap at
+  `report_year + 1` that excludes milestone target columns.
 - **Rule overgeneralisation.** Flash applied "prefer ESRS-larger" to
   Eni water (intended only for scope_1/total_energy) and emitted
   `42 + 12 = 54M` instead of operated-only `42`.
@@ -683,24 +764,33 @@ prompt; flash-lite ignored it; flash respects it.
 
 ### 5.4 Inherent corpus limits
 
-- **Shell water.** Gold value 26 M m³ does not appear in pdfplumber's
-  text output anywhere in the report. Lives in an infographic on page
-  122. Recoverable only with multimodal LLM image input or page-image
-  OCR.
-- **Iberdrola scope_1 (baseline only).** pdfplumber flattens the data
-  row to `"2 5,179,674 5,246,890 1.3 N/AV. N/AV."` — no label on the
-  same line; the year header uses `25/24` notation that the
-  `\b(19|20)\d{2}\b` regex doesn't match. The LLM solves this by
-  reading the section heading several lines above; baseline can't.
+- **Shell scope_1 (baseline only).** The 69 Mt ESRS-aligned figure
+  is computed only in narrative prose; no single line/cell in the PDF
+  says "69". The baseline's line-and-table scanner cannot reach it.
+  The LLM can — `gemini-2.5-flash` returns 69 M tCO₂e, the weakest
+  preview models revert to the 46 M operational-control sub-total.
+
+Two cells previously listed here have been moved out of this bucket:
+
+- **Shell water.** With the gold corrected to 86 M m³ (operational-
+  control boundary), the value is in an extractable table on page 385.
+  The misextraction is now a Bucket-B boundary-disambiguation failure
+  (which of two boundary-tagged tables to pick) — not corpus-bound.
+- **Iberdrola scope_1 (baseline).** Solved by capping `_find_year_col`
+  at `report_year + 1`. Previously the table-path selected the 2050
+  target column (where every cell is `"N/AV."`) and silently failed;
+  now it selects 2025 and recovers `5,246,890 tCO₂e`.
 
 ### 5.5 Failure-mode tally for the canonical run
+
+For the post-fix canonical run (baseline + `gemini-2.5-flash`):
 
 | bucket | count | fixable in code? |
 |---|---|---|
 | retrieval | 1 | partially (top_n + queries) |
 | extraction (rules) | 2 | yes (prompt edits / negative tokens / post-extraction guard) |
 | normalisation | 0 | already fixed by tier change |
-| corpus limit | 1 | not without multimodal/OCR |
+| corpus limit | 1 | not without a stronger LLM (Shell scope_1 ESRS aggregation has no single line/cell to extract) |
 
 The 14/15 best-of-either headline is the **union** of two extractors
 that fail in structurally different ways. Reporting only one number
@@ -722,10 +812,18 @@ First run: ~5-15 min per long PDF (ClimateBERT embedding pass) +
 ~3-5 min for retrieval + extraction + LLM calls. Subsequent runs: seconds
 (both `IndexedReport` and LLM responses cached on disk).
 
-Three runs are committed for direct reproducibility:
-- `data/runs/v9_magnitude_tiebreak/` (baseline-only).
-- `data/runs/v_gemini_25flash_post_quota/` (canonical LLM run).
-- `data/runs/v_gemini_post_quota/` (flash-lite for §10/§12 discussion).
+Runs available for direct reproducibility:
+- `data/runs/v9_magnitude_tiebreak/` — pre-fix baseline-only.
+- `data/runs/v_gemini_25flash_post_quota/` — pre-fix `gemini-2.5-flash`
+  LLM run referenced in the original headline.
+- `data/runs/v_gemini_post_quota/` — `gemini-2.5-flash-lite` (kept for
+  §5/error-mode discussion).
+- `data/runs/v_corrected_gold/` — `gemini-2.5-flash`, gold-corrected,
+  pre-code-fix; LLM 12/15.
+- `data/runs/v_after_fixes/` — `gemini-3-flash-preview`, gold-corrected,
+  with year-col cap + water boundary rule; baseline 12/15, LLM 9/15.
+- `data/runs/v_gemini31_lite/` — `gemini-3.1-flash-lite-preview`, same
+  code; baseline 12/15, LLM 6/15 (3 cells lost to API 503s).
 
 ### 6.2 Determinism
 

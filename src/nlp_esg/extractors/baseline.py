@@ -46,12 +46,17 @@ def _find_year_col(headers: list[str], report_year: int) -> int | None:
     column.  Using the most-recent year rather than trying to match report_year
     (derived from the filename) avoids mismatches when a "2024"-named file
     actually covers fiscal year 2025.
+
+    Caps candidate years at `report_year + 1` so milestone/target columns
+    (Iberdrola's 2026/2040/2050 alongside actual 2024/2025) don't get picked.
     """
     best: tuple[int, int] | None = None
     for i, h in enumerate(headers):
         m = _YEAR_RE.search(h or "")
         if m:
             year = int(m.group(0))
+            if year > report_year + 1:
+                continue
             if best is None or year > best[1]:
                 best = (i, year)
     return best[0] if best else None

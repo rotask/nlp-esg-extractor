@@ -102,6 +102,17 @@ def test_pick_year_column_searches_far_above_in_long_table():
     assert abs(result - 47_300_000) < 100
 
 
+def test_find_year_col_skips_future_target_years():
+    """Iberdrola-style table: actual data years 2024/2025 alongside milestone
+    target years 2026/2040/2050. We must pick the most-recent ACTUAL year,
+    not 2050."""
+    from nlp_esg.extractors.baseline import _find_year_col
+
+    headers = ["Tons", "2024", "2025", "%\n25/24", "2026", "2040", "2050",
+               "Annual %\ntarget /\nBase year"]
+    assert _find_year_col(headers, report_year=2024) == 2  # the "2025" column
+
+
 def test_baseline_rejects_truly_out_of_range(fake_embed):
     weird = {
         "company": "acme", "report_year": 2024,

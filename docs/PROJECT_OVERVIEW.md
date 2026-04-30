@@ -102,8 +102,14 @@ Five companies × three KPIs = **15 gold cells**.
 | **Best-of-either (combined)**      | **14 / 15**  | **0.96** | Take the correct answer from whichever extractor got it |
 
 The two extractors fail on **different** cells, so combining them recovers
-14 of 15. The single unrecovered cell is **Shell water (gold = 26 M m³)** —
-the value lives inside a chart/infographic that no text-based parser can read.
+14 of 15. The single unrecovered cell is **Shell water (gold = 86 M m³,
+operational-control boundary)**. Shell publishes water consumption in
+two tables — *operational control* on page 385 (86 M m³, the primary
+disclosure) and *financial control* on page 424 (127 M m³, supplementary).
+The baseline picks a narrative sentence on page 383
+(`"around 72 million cubic metres"`); the LLM picks the financial-control
+table. The data is extractable from the PDF text — this is a
+boundary-disambiguation failure, not a corpus limit.
 
 For context, the baseline started at **0/15** in iteration 1 and reached
 12/15 only after several rounds of debugging (recorded in `docs/FINDINGS.md`).
@@ -231,9 +237,9 @@ and writes `metrics.csv`.
 
 | KPI                       | Baseline TP | LLM TP | Best-of-either |
 |---------------------------|-------------|--------|----------------|
-| Scope 1 emissions         | 3 / 5       | 5 / 5  | 5 / 5          |
+| Scope 1 emissions         | 4 / 5       | 5 / 5  | 5 / 5          |
 | Total energy consumption  | 5 / 5       | 4 / 5  | 5 / 5          |
-| Water consumption         | 4 / 5       | 3 / 5  | 4 / 5          |
+| Water consumption         | 3 / 5       | 3 / 5  | 4 / 5          |
 | **Total**                 | **12 / 15** | **12 / 15** | **14 / 15** |
 
 **Total energy consumption is solved.** Both extractors get 4–5/5;
@@ -244,12 +250,18 @@ combined, all five companies are correct.
 - The **baseline** uniquely solves cells where the value is in a
   cleanly-structured table or labelled line. Its strength is determinism
   — same input, same output, no API cost, fully auditable rules.
-- The **LLM** uniquely solves **Iberdrola Scope 1** (gold = 5,246,890 tCO₂e).
-  This value lives on a row that pdfplumber flattens into bare numbers
-  with no nearby label: `2 5,179,674 5,246,890 1.3 N/AV. N/AV.`. Only
-  the LLM, by reading the section heading several lines above, can
-  associate the row with "Gross Scope 1 GHG emissions" and pick the
-  right column for 2025.
+- The **LLM** uniquely solves **Shell Scope 1** (gold = 69 M tCO₂e).
+  Shell publishes a consolidated-only figure (~46 M tCO₂e) and an
+  ESRS-aligned figure (69 M tCO₂e) that includes operated-but-not-
+  consolidated entities. The baseline cannot reach 69 because no single
+  line says it; only a sufficiently capable LLM picks it from the
+  surrounding narrative (`gemini-2.5-flash` does; weaker models such as
+  `gemini-3.1-flash-lite-preview` revert to the 46 sub-total).
+
+Iberdrola Scope 1 was previously LLM-unique too, but a recent fix to
+`_find_year_col` (cap candidate years at `report_year + 1`, so target
+columns 2026/2040/2050 in the same header row are skipped) lets the
+baseline solve it as well.
 
 This is the value of running both — they fail on different cells.
 
@@ -276,15 +288,17 @@ The right page never reaches the extractor. The system simply doesn't
 see the data.
 
 - **Shell total energy (gold = 269 M MWh).** The gold value sits on
-  page 366 of Shell's Sustainability Report. Our hybrid retrieval ranks
-  it outside the top 16 pages, so neither the baseline's line scanner
-  nor the LLM's prompt contains it. Both extractors instead pick a
-  similar-sounding "189 billion kWh" prose figure (operational-control
-  boundary, not the ESRS-aligned total).
+  page ~366–368 of Shell's Sustainability Report. With `gemini-2.5-flash`
+  the LLM picks a competing "189 billion kWh" prose figure
+  (operational-control boundary, not the ESRS-aligned total); the baseline
+  finds the right value on page 368 (`Total energy consumption [A] million
+  MWh 269 289`) when its top-25 retrieval includes that page. So this is
+  partly retrieval (page-366 mention not always in the top-N) and partly
+  extraction (the LLM disambiguates poorly between competing figures on
+  retrieved pages).
 - **Fix path.** Wider retrieval window (top-25 already helped Enel),
-  better KPI query phrasings, or a different ranker. Cheap to try; not
-  guaranteed to work because Shell uses very specific ESRS terminology
-  in headings.
+  better KPI query phrasings, or a stronger model: `gemini-3-flash-preview`
+  picked 269 M MWh correctly on this cell.
 
 ### 6.2 Bucket B — Extraction errors
 
@@ -295,16 +309,29 @@ number. Three sub-types:
   - *Withdrawal vs. consumption.* All five companies report water
     figures multiple times — once as "withdrawal" (water taken in),
     once as "consumption" (water actually used). Gold is consumption.
-    The smaller LLM (`flash-lite`) picked withdrawal in 4/5 water
-    cells despite explicit rules. The larger model (`flash`) follows
-    the rule on 3 of those 4. The baseline avoids it via negative
-    tokens (`withdrawal`, `discharged`, `recycled`).
-  - *Operational control vs. ESRS-aligned aggregation.* Shell reports
-    "Scope 1 = 46 Mt" (consolidated entities only) and "ESRS-aligned
-    Scope 1 = 69 Mt" (includes operated-but-not-consolidated
-    entities). Gold is the larger ESRS figure. The baseline can't
-    reach it because no single line says "69"; the LLM can only get
-    it with a sufficiently capable model.
+    The smaller LLM (`gemini-2.5-flash-lite`) picked withdrawal in 4/5
+    water cells despite explicit rules. `gemini-2.5-flash` follows the
+    rule on 3 of those 4. Newer preview models (`gemini-3-flash-preview`,
+    `gemini-3.1-flash-lite-preview`) ignore the rule again — for example
+    `gemini-3.1-flash-lite-preview` returns Iberdrola water as
+    `1,274,971,000 m³` from a row literally labelled "Total water
+    withdrawal". The baseline avoids it via negative tokens
+    (`withdrawal`, `discharged`, `recycled`).
+  - *Operational control vs. ESRS-aligned aggregation (Scope 1).* Shell
+    reports "Scope 1 = 46 Mt" (consolidated entities only) and
+    "ESRS-aligned Scope 1 = 69 Mt" (includes operated-but-not-consolidated
+    entities). Gold is the larger ESRS figure. The baseline can't reach
+    it because no single line says "69"; the LLM can only get it with a
+    sufficiently capable model.
+  - *Operational control vs. financial control (water).* Shell publishes
+    water consumption against TWO boundaries — operational control on
+    page 385 (86 M m³) and financial control on page 424 (127 M m³).
+    The system prompt was extended to prefer the operational-control
+    figure (the primary disclosure for water in oil & gas reports), but
+    the preview models tested (`gemini-3-flash-preview`,
+    `gemini-3.1-flash-lite-preview`) still picked 127. Each KPI has its
+    own preferred boundary — the prompt rules are KPI-scoped to avoid
+    leaking the Scope 1 "prefer-larger" instruction onto water.
 - **Wrong year column.** The line contains 5 yearly values; the
   extractor picks the wrong one. The baseline addresses this by
   searching ±25 lines for a year header and picking the column matching
@@ -332,34 +359,35 @@ wrong.
 
 ### 6.4 Inherent corpus limits (not fixable in code)
 
-- **Shell water (gold = 26 M m³).** The gold value lives inside an
-  **infographic** on page 122. No text-based extractor (Docling,
-  pdfplumber, or LLM consuming their text) sees the digit "26". The
-  caption says *"million cubic metres fresh-water consumption"* but the
-  number is rendered as a graphic element. To recover this cell we'd
-  need OCR over the rendered page or a multimodal LLM with image input.
-- **Iberdrola Scope 1 (baseline only).** The data row in pdfplumber's
-  output is `"2 5,179,674 5,246,890 1.3 N/AV. N/AV."` — column-flattened,
-  no label on the same line. The LLM solves this by looking at the
-  section heading several lines above; the baseline's line-by-line
-  scanner can't.
+- **Shell scope_1 (baseline only).** The 69 Mt ESRS-aligned figure
+  is computed only in narrative prose; no single line/cell in the
+  PDF says "69". The baseline's line-and-table scanner can't reach
+  it. The LLM can.
+
+Two cells previously listed here have been moved out of this bucket:
+
+- **Shell water** is no longer a corpus limit. The gold value (86 M m³,
+  operational-control boundary) is in an extractable table on page 385.
+  The misextraction is now a Bucket-B definition-disambiguation failure
+  (which boundary to pick).
+- **Iberdrola Scope 1 (baseline)** was solved by capping `_find_year_col`
+  at `report_year + 1`, so the table-path no longer selects the 2050
+  target column (where every cell is `"N/AV."`).
 
 ### 6.5 Error breakdown summary
 
-For the canonical run (`v_gemini_25flash_post_quota`, baseline + Gemini
-2.5-flash):
+For the canonical run (baseline post-fix + `gemini-2.5-flash`):
 
 | Bucket            | Count | Fixable in code? |
 |-------------------|-------|------------------|
 | Retrieval         | 1     | Partially (top_n + queries) |
 | Extraction (rules)| 2     | Yes (prompt edits / negative tokens) |
 | Normalisation     | 0     | — (already fixed by the bigger model) |
-| Corpus limit      | 1     | No without multimodal/OCR |
+| Corpus limit      | 1     | No (baseline cannot reach narrative-only ESRS aggregation) |
 
 The headline 14/15 (best-of-either) is therefore **not a blunt
 aggregate** — it is the union of two extractors whose failures are
-structurally different. One mistake (Shell water) is an artefact of the
-input data, not the algorithm.
+structurally different.
 
 ---
 
@@ -382,16 +410,37 @@ Three takeaways are worth highlighting in the final report:
    remaining errors are a mix of retrieval limits, prompt-rule edge
    cases, and corpus limits — none of which a bigger model fixes for
    free.
+4. **Newer is not always better on this corpus.** A four-model
+   comparison on the corrected gold + post-fix code:
+
+   | Model | LLM TP | Notes |
+   |---|---|---|
+   | `gemini-2.5-flash` | 12 / 15 | Canonical; follows all prompt rules |
+   | `gemini-2.5-flash-lite` | 8 / 15 | Misses withdrawal/consumption + magnitude rules |
+   | `gemini-3-flash-preview` | 9 / 15 | Sums components instead of picking pre-computed totals; ignores operational-control rule |
+   | `gemini-3.1-flash-lite-preview` | 6 / 15 | Same rule violations + 3 cells lost to API 503s |
+
+   `gemini-2.5-flash` remains the most rule-compliant Gemini option
+   for this task; the two preview models tested showed regressions
+   that prompt edits alone could not compensate for.
 
 ---
 
 ## 8. Where the canonical artefacts live
 
-- `data/runs/v9_magnitude_tiebreak/` — best baseline-only run.
-- `data/runs/v_gemini_25flash_post_quota/` — best LLM run; this is the
-  one referenced by the headline 12/15 LLM and 14/15 best-of-either.
-- `data/runs/v_gemini_post_quota/` — flash-lite version retained for
-  the error-mode discussion (its failures are pedagogically clearer).
+- `data/runs/v9_magnitude_tiebreak/` — best pre-fix baseline-only run.
+- `data/runs/v_gemini_25flash_post_quota/` — pre-fix LLM run on
+  `gemini-2.5-flash` referenced in the original 12/15 LLM / 14/15
+  best-of-either headline.
+- `data/runs/v_gemini_post_quota/` — `gemini-2.5-flash-lite` run, kept
+  for the error-mode discussion (its failures are pedagogically clearer).
+- `data/runs/v_corrected_gold/` — `gemini-2.5-flash` after the gold
+  correction (Shell water 26 → 86 M m³); LLM 12 / 15.
+- `data/runs/v_after_fixes/` — `gemini-3-flash-preview` after the
+  baseline year-col fix and the water boundary-rule prompt extension;
+  baseline 12 / 15, LLM 9 / 15.
+- `data/runs/v_gemini31_lite/` — `gemini-3.1-flash-lite-preview` on the
+  same code; baseline 12 / 15, LLM 6 / 15 (3 cells failed with API 503s).
 - `data/labels/gold_labels.csv` — 15 hand-labelled values with source
   page numbers and adjudication notes.
 - `data/runs/<tag>/llm_prompts/*.json` — full prompt + retrieved pages
