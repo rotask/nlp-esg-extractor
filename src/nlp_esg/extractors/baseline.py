@@ -106,11 +106,23 @@ def _infer_unit_from_row_or_header(
     for i, h in enumerate(headers):
         if (h or "").strip().lower() in ("unit", "units"):
             try:
-                u = canonicalize_unit(row[i])
+                u = canonicalize_unit(normalize_co2(row[i] or ""))
             except (ValueError, IndexError):
                 continue
             if u in unit_family_canonicals:
                 return u
+
+    # 2.5. Docling pattern: empty header but unit sits in row[1].
+    # ESG tables routinely follow [Label, Unit, year_values...] without
+    # actually labelling the second column 'Unit'. Try canonicalising row[1]
+    # directly; cells that aren't units (numbers, '#', etc.) raise and we move on.
+    if len(row) > 1 and value_col != 1:
+        try:
+            u = canonicalize_unit(normalize_co2(row[1] or ""))
+        except (ValueError, IndexError):
+            u = None
+        if u in unit_family_canonicals:
+            return u
 
     # 3. Check the value column's own header (e.g., "2024 (tCO2e)")
     if value_col < len(headers):

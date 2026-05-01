@@ -102,6 +102,52 @@ def test_pick_year_column_searches_far_above_in_long_table():
     assert abs(result - 47_300_000) < 100
 
 
+def test_baseline_extracts_with_co2_subscript_spaces(fake_embed):
+    """Docling preserves the CO2 subscript with spaces ('MtCO 2 e').
+    The unit-inference path must apply normalize_co2() before canonicalize_unit
+    so the existing ' Unit'-column detection works on Docling output."""
+    docling_table = {
+        "company": "demo", "report_year": 2024,
+        "pages": [{"page_num": 1, "text": "Scope 1 emissions report"}],
+        "tables": [{
+            "page_num": 6,
+            "headers": ["Metric", "Unit", "2024", "2025"],
+            "rows": [
+                # Row label tuned to clear the test fake-embedder's token-overlap
+                # threshold; the relevant docling artefact under test is the
+                # space-separated CO2 subscript in row[1]: 'MtCO 2 e'.
+                ["Scope 1 direct greenhouse gas emissions", "MtCO 2 e", "32.8", "33.7"],
+            ],
+        }],
+    }
+    indexed = build_index(docling_table)
+    ext = BaselineExtractor()
+    result = ext.extract(indexed, "scope_1_emissions")
+    assert result.value == pytest.approx(33_700_000.0)
+    assert result.unit == "tCO2e"
+
+
+def test_baseline_extracts_with_unit_in_row1_no_unit_header(fake_embed):
+    """Docling pattern: unit in row[1] but the matching header cell is empty.
+    Common for Enel-style tables. Unit inference must fall back to row[1]."""
+    docling_table = {
+        "company": "enel", "report_year": 2024,
+        "pages": [{"page_num": 1, "text": "Total energy consumption table"}],
+        "tables": [{
+            "page_num": 150,
+            "headers": ["", "", "2025", "2024", "Change"],
+            "rows": [
+                ["Total energy consumption (primary and final)", "TWh", "168.59", "170.52", "(1.93)"],
+            ],
+        }],
+    }
+    indexed = build_index(docling_table)
+    ext = BaselineExtractor()
+    result = ext.extract(indexed, "total_energy_consumption")
+    assert result.value == pytest.approx(168_590_000.0)
+    assert result.unit == "MWh"
+
+
 def test_find_year_col_skips_future_target_years():
     """Iberdrola-style table: actual data years 2024/2025 alongside milestone
     target years 2026/2040/2050. We must pick the most-recent ACTUAL year,
