@@ -19,6 +19,7 @@ from nlp_esg.extractors.base import Extractor
 from nlp_esg.normalize import (
     _NUMBER_RE,
     canonicalize_unit,
+    canonicalize_unit_robust,
     normalize_co2,
     parse_number,
     parse_value,
@@ -94,65 +95,85 @@ def _row_score(query: str, query_tokens: set[str], row_label: str) -> float:
 
 def _infer_unit_from_row_or_header(
     headers: list[str], row: list[str], value_col: int, unit_family_canonicals: set[str]
-) -> str | None:
-    """Look for a unit in: the cell itself (trailing), a 'Unit' column, or header annotation."""
+) -> tuple[float, str] | None:
+    """Look for a unit; return `(multiplier, canonical_unit)` or None.
+
+    Multiplier accounts for magnitude prefixes ('million', 'thousand') so the
+    caller multiplies the parsed cell value before canonical conversion.
+    Multiplier is 1.0 for "plain" units like 'MWh' or 'tCO2e'.
+
+    Search order (first match wins):
+    1. The value cell itself (`"45,678 tCO2e"`)
+    2. A `'Unit'`/`'Units'` column header
+    3. row[1] as a fallback unit cell (Docling tables often place the unit in
+       column 1 without labelling the header)
+    4. The value column's own header (`"2024 (tCO2e)"` or `"million MWh.2025"`)
+    5. The KPI-row label (first cell)
+    6. Any other table header
+    """
+    def _match(s: str) -> tuple[float, str] | None:
+        r = canonicalize_unit_robust(s)
+        if r and r[1] in unit_family_canonicals:
+            return r
+        return None
+
     # 1. Check the value cell itself ("45,678 tCO2e")
     cell = row[value_col] if value_col < len(row) else ""
     pv = parse_value(cell, kpi_unit_family=list(unit_family_canonicals))
     if pv:
-        return pv[1]
+        return (1.0, pv[1])
 
     # 2. Look for a 'Unit' column
     for i, h in enumerate(headers):
         if (h or "").strip().lower() in ("unit", "units"):
-            try:
-                u = canonicalize_unit(normalize_co2(row[i] or ""))
-            except (ValueError, IndexError):
-                continue
-            if u in unit_family_canonicals:
-                return u
+            if i < len(row):
+                m = _match(row[i] or "")
+                if m:
+                    return m
 
-    # 2.5. Docling pattern: empty header but unit sits in row[1].
+    # 3. Docling pattern: empty header but unit sits in row[1].
     # ESG tables routinely follow [Label, Unit, year_values...] without
-    # actually labelling the second column 'Unit'. Try canonicalising row[1]
-    # directly; cells that aren't units (numbers, '#', etc.) raise and we move on.
+    # actually labelling the second column 'Unit'.
     if len(row) > 1 and value_col != 1:
-        try:
-            u = canonicalize_unit(normalize_co2(row[1] or ""))
-        except (ValueError, IndexError):
-            u = None
-        if u in unit_family_canonicals:
-            return u
+        m = _match(row[1] or "")
+        if m:
+            return m
 
-    # 3. Check the value column's own header (e.g., "2024 (tCO2e)")
+    # 4. Check the value column's own header. Try the WHOLE header first
+    # (so compound forms like 'million cubic metres.2025' or 'millionMWh.2025'
+    # hit canonicalize_unit_robust's magnitude+year-suffix path), then fall
+    # back to per-token scanning for embedded forms like '2024 (tCO2e)'.
     if value_col < len(headers):
-        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", normalize_co2(headers[value_col] or "")):
-            try:
-                u = canonicalize_unit(token)
-            except ValueError:
-                continue
-            if u in unit_family_canonicals:
-                return u
+        h = headers[value_col] or ""
+        m = _match(h)
+        if m:
+            return m
+        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", normalize_co2(h)):
+            m = _match(token)
+            if m:
+                return m
 
-    # 4. Check the KPI-row header (first cell) for a unit
+    # 5. Check the KPI-row header (first cell) for a unit
     if row:
-        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", normalize_co2(row[0] or "")):
-            try:
-                u = canonicalize_unit(token)
-            except ValueError:
-                continue
-            if u in unit_family_canonicals:
-                return u
+        h0 = row[0] or ""
+        m = _match(h0)
+        if m:
+            return m
+        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", normalize_co2(h0)):
+            m = _match(token)
+            if m:
+                return m
 
-    # 5. Check the table-level headers for a unit annotation
+    # 6. Check the table-level headers for a unit annotation
     for h in headers:
-        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", normalize_co2(h or "")):
-            try:
-                u = canonicalize_unit(token)
-            except ValueError:
-                continue
-            if u in unit_family_canonicals:
-                return u
+        ht = h or ""
+        m = _match(ht)
+        if m:
+            return m
+        for token in re.findall(r"[A-Za-z0-9µ³²\-]+", normalize_co2(ht)):
+            m = _match(token)
+            if m:
+                return m
 
     return None
 
@@ -189,7 +210,18 @@ class BaselineExtractor(Extractor):
 
         table_candidates.sort(key=lambda x: x[0], reverse=True)
 
-        best_table_result: tuple[float, KPIExtraction] | None = None
+        # Generic column-header words that sometimes appear as row[0] (notably
+        # in Iberdrola's [Metric, Description, Unit, year, year] schema where
+        # every data row's first cell is the literal string 'Metric'). When
+        # detected, score row[1] instead so the actual label is considered.
+        _COLUMN_HEADER_ARTIFACTS = {"metric", "metrics", "indicator", "indicators",
+                                    "description", "descriptions", "topic", "kpi"}
+
+        # Collect ALL viable table candidates (one per table). Magnitude tiebreak
+        # below picks among candidates whose combined_score is within 5% of the
+        # best — preferring the LARGEST canonical value, which corresponds to
+        # the operational-control / consolidated total in ESG datasheets.
+        all_table_candidates: list[tuple[float, KPIExtraction]] = []
 
         for table_sim, table, _, _ in table_candidates:
             headers, rows = _effective_headers_and_rows(table)
@@ -200,15 +232,39 @@ class BaselineExtractor(Extractor):
             best_row_idx = None
             best_row_score = 0.0
             negative_tokens = [t.lower() for t in kpi.get("negative_tokens", [])]
+            current_section = ""  # propagated from preceding section-header rows
             for ri, row in enumerate(rows):
                 if not row:
                     continue
-                row_label = (row[0] or "").lower()
-                # Reject rows that match a per-KPI negative token (e.g. a
-                # 'renewable production' row when extracting total energy).
-                if any(neg in row_label for neg in negative_tokens):
+                # Section-header rows have no number in the year column. Track
+                # their row[0] as the current section so subsequent data rows
+                # inherit it for negative-token filtering. (BP's 'GHG-Equityshare'
+                # section gets rejected by 'equity' once section context is
+                # available; without this the equity sub-table beats operational
+                # control on phrase-overlap alone.)
+                if year_col >= len(row):
                     continue
-                rs = _row_score(kpi["query"], query_tokens, row[0] or "")
+                if not re.search(_NUMBER_RE, row[year_col] or ""):
+                    if (row[0] or "").strip():
+                        current_section = row[0]
+                    continue
+
+                # Pick the label cell. Falls back to row[1] when row[0] is a
+                # generic column-header artefact ('Metric', 'Description'…).
+                label_cell = row[0] or ""
+                if label_cell.strip().lower() in _COLUMN_HEADER_ARTIFACTS and len(row) > 1:
+                    label_cell = row[1] or ""
+
+                # Negative tokens apply against (section + row label + row[1]
+                # unit cell) so a 'GHG-Equityshare' section flag reaches data
+                # rows below it.
+                neg_haystack = (
+                    current_section + " " + label_cell + " " +
+                    (row[1] if len(row) > 1 else "")
+                ).lower()
+                if any(neg in neg_haystack for neg in negative_tokens):
+                    continue
+                rs = _row_score(kpi["query"], query_tokens, label_cell)
                 if rs > best_row_score:
                     best_row_score = rs
                     best_row_idx = ri
@@ -228,15 +284,18 @@ class BaselineExtractor(Extractor):
             except ValueError:
                 continue
 
-            unit = _infer_unit_from_row_or_header(
+            unit_match = _infer_unit_from_row_or_header(
                 headers, row, year_col, unit_family_canonicals
             )
-            if unit is None or unit not in unit_family_canonicals:
+            if unit_match is None:
+                continue
+            multiplier, unit = unit_match
+            if unit not in unit_family_canonicals:
                 continue
 
             try:
                 canonical_value = to_canonical_value(
-                    raw_value, unit, kpi["canonical_unit"]
+                    raw_value * multiplier, unit, kpi["canonical_unit"]
                 )
             except ValueError:
                 continue
@@ -255,6 +314,12 @@ class BaselineExtractor(Extractor):
                 candidate_flags.append("year_shaped_value")
                 combined_score *= 0.5
 
+            # Use the actual label text in the source snippet (not the raw
+            # row[0] which may be a column-header artefact).
+            display_label = (
+                row[1] if (row and (row[0] or "").strip().lower() in _COLUMN_HEADER_ARTIFACTS and len(row) > 1)
+                else (row[0] if row else "")
+            )
             candidate = KPIExtraction(
                 company=report["company"],
                 report_year=report["report_year"],
@@ -262,17 +327,26 @@ class BaselineExtractor(Extractor):
                 value=canonical_value,
                 unit=kpi["canonical_unit"],
                 reporting_year=report["report_year"],
-                source_snippet=f"table@page {table['page_num']}: {row[0]} | {cell}",
+                source_snippet=f"table@page {table['page_num']}: {display_label} | {cell}",
                 source_page=table["page_num"],
                 confidence=combined_score,
                 extractor=self.name,
                 flags=candidate_flags,
             )
-            if best_table_result is None or combined_score > best_table_result[0]:
-                best_table_result = (combined_score, candidate)
+            all_table_candidates.append((combined_score, candidate))
 
-        if best_table_result is not None:
-            return best_table_result[1]
+        if all_table_candidates:
+            # Magnitude tiebreak: among candidates within 5% of the best
+            # combined_score, prefer the LARGEST canonical value. This breaks
+            # ties between equity-share vs operational-control sub-tables
+            # toward the operational-control figure (BP scope_1, Shell scope_1).
+            best_score = max(c[0] for c in all_table_candidates)
+            tied = [c for c in all_table_candidates
+                    if best_score == 0 or (best_score - c[0]) / best_score <= 0.05]
+            best = max(tied, key=lambda c: c[1].value or 0.0) if len(tied) > 1 else max(
+                all_table_candidates, key=lambda c: c[0]
+            )
+            return best[1]
 
         # --- Page-level line-scanning fallback ---
         # The original sentence fallback failed because ESG data lines almost

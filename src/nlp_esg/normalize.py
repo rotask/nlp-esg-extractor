@@ -114,6 +114,62 @@ def canonicalize_unit(unit: str) -> str:
     raise ValueError(f"Unknown unit: {unit!r}")
 
 
+_YEAR_SUFFIX_RE = re.compile(r"\.\s*(?:19|20)\d{2}\s*$")
+
+
+def canonicalize_unit_robust(s: str) -> tuple[float, str] | None:
+    """Robust unit resolution for Docling-style headers and cells.
+
+    Returns `(multiplier, canonical_unit)` on success, or `None` if the string
+    cannot be resolved. The multiplier accounts for magnitude prefixes
+    ('million', 'thousand', 'billion') so callers can apply it to the parsed
+    value: `canonical_value = parsed_value * multiplier * conversion_factor`.
+
+    Handles patterns the strict `canonicalize_unit` rejects:
+      - Outer whitespace, parens, brackets (Eni 'WATER (Mm 3 )')
+      - Internal whitespace (Enel 'MtCO 2eq')
+      - Trailing `.YYYY` (Docling compound header 'million cubic metres.2025')
+      - Glued magnitude+unit (Shell 'millionMWh' -> 1e6 * MWh)
+      - Loose magnitude prefix ('million m3', 'million cubic metres')
+      - CO2 subscript artefacts (delegates to `normalize_co2`)
+    """
+    if not s:
+        return None
+    text = normalize_co2(s)
+    text = text.strip(" \t\n()[]{}*")
+    if not text:
+        return None
+    text = _YEAR_SUFFIX_RE.sub("", text).strip()
+    if not text:
+        return None
+
+    # Try direct + internal-whitespace-stripped variants.
+    for variant in (text, re.sub(r"\s+", "", text)):
+        try:
+            return (1.0, canonicalize_unit(variant))
+        except ValueError:
+            pass
+
+    # Try peeling a magnitude prefix off (loose: "million MWh", tight:
+    # "millionMWh"). Iterate longest-first so 'million' beats 'mill' if we
+    # ever add both.
+    text_lc = text.lower()
+    text_lc_nospace = re.sub(r"\s+", "", text_lc)
+    for mag_word in sorted(_MAGNITUDE, key=len, reverse=True):
+        mag_factor = _MAGNITUDE[mag_word]
+        for candidate in (text_lc, text_lc_nospace):
+            if candidate.startswith(mag_word) and candidate != mag_word:
+                rest = candidate[len(mag_word):].strip(" \t().,")
+                if not rest:
+                    continue
+                for variant in (rest, re.sub(r"\s+", "", rest)):
+                    try:
+                        return (mag_factor, canonicalize_unit(variant))
+                    except ValueError:
+                        continue
+    return None
+
+
 # Conversion factors. Key = (from_unit, to_unit), value = multiplier.
 # Only canonical -> canonical conversions are defined here; canonicalize_unit maps aliases first.
 _CONVERSIONS: dict[tuple[str, str], float] = {

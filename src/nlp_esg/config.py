@@ -38,7 +38,10 @@ KPIS: dict[str, dict] = {
         "plausible_range": (1e2, 1e9),
         # Lines containing any of these tokens are rejected by the line-scanning
         # fallback — they identify metrics that are NOT total scope 1.
-        "negative_tokens": ["scope 2", "scope 3", "scopes 1, 2", "methane", "intensity", "per ", "fugitive"],
+        # 'equity' rejects BP's GHG-Equityshare sub-table when section context
+        # is propagated to row scoring — gold prefers the operational-control
+        # consolidated figure.
+        "negative_tokens": ["scope 2", "scope 3", "scopes 1, 2", "methane", "intensity", "per ", "fugitive", "equity"],
     },
     "total_energy_consumption": {
         "query": "Total energy consumption",
@@ -50,10 +53,16 @@ KPIS: dict[str, dict] = {
         "unit_family": ["MWh", "GWh", "TWh", "GJ", "TJ", "PJ", "kWh"],
         "canonical_unit": "MWh",
         "plausible_range": (1e2, 1e9),
-        "negative_tokens": ["renewable", "produced", "production", "intensity", "per ", "discontinued"],
+        "negative_tokens": ["renewable", "produced", "production", "intensity", "per ", "discontinued", "equity"],
     },
     "water_consumption": {
-        "query": "Total water consumption withdrawal",
+        # 'withdrawal' is dropped from the canonical query because the table-
+        # row scorer uses query-token overlap, and including 'withdrawal' here
+        # falsely lifts withdrawal-row scores even after negative_tokens
+        # filter them — they competed with the consumption row and the
+        # phrase-vs-overlap arithmetic could push a withdrawal-flavoured
+        # candidate above 'Freshwater consumption' / 'Water consumption'.
+        "query": "Total water consumption",
         "queries": [
             "Total freshwater consumption million m3",
             "Water consumption m3",
