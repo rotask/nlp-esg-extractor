@@ -41,22 +41,25 @@ def _structural_score(headers: list[str], report_year: int) -> float:
 
 
 def _find_year_col(headers: list[str], report_year: int) -> int | None:
-    """Return the column index of the MOST RECENT year found in headers.
+    """Return the column index of the MOST RECENT year found in headers,
+    capped at `report_year`.
 
-    ESG reports typically show the current reporting year as the leftmost data
-    column.  Using the most-recent year rather than trying to match report_year
-    (derived from the filename) avoids mismatches when a "2024"-named file
-    actually covers fiscal year 2025.
+    ESG reports typically show the current reporting year as the leftmost
+    data column. The cap rejects milestone/target columns
+    (Iberdrola tables include 2026/2040/2050 alongside actual 2024/2025) —
+    without it, `_find_year_col` selected `'2050'` and every data cell in
+    that column is `'N/AV.'` so the table-path silently dropped every
+    candidate row.
 
-    Caps candidate years at `report_year + 1` so milestone/target columns
-    (Iberdrola's 2026/2040/2050 alongside actual 2024/2025) don't get picked.
+    The convention is that the filename year matches the most recent data
+    column: `bp_2025.pdf` is paired with the `2025` column in the table.
     """
     best: tuple[int, int] | None = None
     for i, h in enumerate(headers):
         m = _YEAR_RE.search(h or "")
         if m:
             year = int(m.group(0))
-            if year > report_year + 1:
+            if year > report_year:
                 continue
             if best is None or year > best[1]:
                 best = (i, year)

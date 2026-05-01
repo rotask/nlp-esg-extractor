@@ -23,7 +23,7 @@ from nlp_esg.ingest import parse_pdf
 from nlp_esg.retrieval import build_index
 
 # 1. Parse a PDF — Docling first, pdfplumber fallback. Cached on disk.
-parsed = parse_pdf(Path("data/reports/iberdrola_2024.pdf"))
+parsed = parse_pdf(Path("data/reports/iberdrola_2025.pdf"))
 
 # 2. Add per-sentence + per-table-header embeddings (ClimateBERT). Cached.
 indexed = build_index(parsed)
@@ -49,7 +49,7 @@ Dataclass — the canonical row produced by both extractors and serialised to
 | Field            | Type            | Notes                                                                |
 |------------------|-----------------|----------------------------------------------------------------------|
 | `company`        | `str`           | Lowercase company slug parsed from the PDF filename.                 |
-| `report_year`    | `int`           | Year parsed from the PDF filename (e.g. `iberdrola_2024.pdf` -> 2024). |
+| `report_year`    | `int`           | Year parsed from the PDF filename (e.g. `iberdrola_2025.pdf` -> 2025). |
 | `kpi`            | `str`           | One of the keys in `nlp_esg.config.KPI_KEYS`.                        |
 | `value`          | `float \| None` | Canonicalised value, or `None` for "not reported".                   |
 | `unit`           | `str \| None`   | Canonical unit (`tCO2e`, `MWh`, `m3`), or `None`.                    |

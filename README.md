@@ -10,7 +10,7 @@ PDFs and measures both extractors against a hand-labelled gold set.
 | Total energy consumption  | `MWh`          |
 | Water consumption         | `m3`           |
 
-Five FY2024 reports (BP, Shell, Enel, Eni, Iberdrola) × three KPIs =
+Five FY2025 reports (BP, Shell, Enel, Eni, Iberdrola) × three KPIs =
 **15 gold cells**. Both extractors share the same retrieval layer
 (hybrid BM25 + ClimateBERT embeddings, RRF-fused across multiple query
 phrasings) and the same parsed input. They differ only in *how* they
@@ -143,33 +143,35 @@ filename in the second column:
 
 | Company   | Save as                      | Source PDF (publicly accessible)                                                                                                                                                                                                                            |
 |-----------|------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| bp        | `bp_2024.pdf`                | [BP ESG Datasheet 2025](https://www.bp.com/content/dam/bp/business-sites/en/global/corporate/pdfs/sustainability/group-reports/bp-esg-datasheet-2025.pdf) (paired with the BP Sustainability Report 2025 — the datasheet carries the structured KPI tables) |
-| shell     | `shell_2024.pdf`             | [Shell Annual Report and Accounts 2025](https://www.shell.com/investors/results-and-reporting/annual-report/_jcr_content/root/main/section/promo/links/item0.stream/1774544186011/5727c329a58b5eb7a54442c0a03f562a5aef1159/shell-annual-report-2025-interactive.pdf) |
-| enel      | `enel_2024.pdf`              | [Enel Integrated Annual Report 2025](https://www.enel.com/content/dam/enel-com/documenti/investitori/informazioni-finanziarie/2025/annuali/en/integrated-annual-report_2025.pdf)                                                                            |
-| iberdrola | `iberdrola_2024.pdf`         | [Iberdrola Consolidated Statement of Non-Financial Information (SNFI) and Sustainability Report 2024](https://www.iberdrola.com/documents/20125/5613162/gsm26-sustainability-report-2025.pdf)                                                              |
-| eni       | `eni_2024.pdf`               | [Eni Annual Report 2025](https://www.eni.com/content/dam/enicom/documents/eng/reports/2025/ar-2025/Annual-Report-2025.pdf)                                                                                                                                  |
+| bp        | `bp_2025.pdf`                | [BP ESG Datasheet 2025](https://www.bp.com/content/dam/bp/business-sites/en/global/corporate/pdfs/sustainability/group-reports/bp-esg-datasheet-2025.pdf) (paired with the BP Sustainability Report 2025 — the datasheet carries the structured KPI tables) |
+| shell     | `shell_2025.pdf`             | [Shell Annual Report and Accounts 2025](https://www.shell.com/investors/results-and-reporting/annual-report/_jcr_content/root/main/section/promo/links/item0.stream/1774544186011/5727c329a58b5eb7a54442c0a03f562a5aef1159/shell-annual-report-2025-interactive.pdf) |
+| enel      | `enel_2025.pdf`              | [Enel Integrated Annual Report 2025](https://www.enel.com/content/dam/enel-com/documenti/investitori/informazioni-finanziarie/2025/annuali/en/integrated-annual-report_2025.pdf)                                                                            |
+| iberdrola | `iberdrola_2025.pdf`         | [Iberdrola Consolidated Statement of Non-Financial Information (SNFI) and Sustainability Report 2025](https://www.iberdrola.com/documents/20125/5613162/gsm26-sustainability-report-2025.pdf)                                                              |
+| eni       | `eni_2025.pdf`               | [Eni Annual Report 2025](https://www.eni.com/content/dam/enicom/documents/eng/reports/2025/ar-2025/Annual-Report-2025.pdf)                                                                                                                                  |
 
 Resulting layout:
 
 ```
 data/reports/
-├── bp_2024.pdf
-├── enel_2024.pdf
-├── eni_2024.pdf
-├── iberdrola_2024.pdf
-└── shell_2024.pdf
+├── bp_2025.pdf
+├── enel_2025.pdf
+├── eni_2025.pdf
+├── iberdrola_2025.pdf
+└── shell_2025.pdf
 ```
 
 The filename keys (`bp`, `enel`, `eni`, `iberdrola`, `shell`) are
 parsed by the dispatcher; a different name will not be recognised.
 
-**Filename year vs publication year.** The reports above are titled
-"2025" but cover **FY2024 calendar-year data** alongside the FY2025
-column. The filename is the *data year* (`_2024.pdf`); gold values
-are recorded under `report_year=2024` even though the cell is sometimes
-read from a column the report labels "2025". The pipeline's
-`_find_year_col` cap at `report_year + 1` admits the "2025" column for
-this exact reason.
+**Filename year matches the most-recent data column.** All five reports
+are 2025 publications; the filename year (`_2025.pdf`) and the gold
+`report_year` / `reporting_year` columns both refer to the most-recent
+data column the table publishes — labelled "2025" in every report. The
+prior data column ("2024") is also visible in most tables but is not
+the gold-target. The baseline's `_find_year_col` caps candidate years
+at `report_year`, so milestone columns that some tables also include
+(Iberdrola publishes 2026/2040/2050 target years alongside the actual
+data) get rejected.
 
 ### 6. Verify the setup
 

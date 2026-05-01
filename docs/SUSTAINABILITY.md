@@ -33,7 +33,7 @@ needed for sector-level or index-wide analytics.
 This project automates the *extraction* layer for three numerical
 KPIs (Scope 1 emissions, total energy consumption, water
 consumption) on a five-report evaluation corpus (BP, Shell, Enel,
-Eni, Iberdrola, FY2024). It is deliberately framed as a *building
+Eni, Iberdrola, FY2025). It is deliberately framed as a *building
 block* for downstream analytics — not an analyst replacement.
 Cells that materially affect regulatory filings or investment
 decisions still require human review; the system's job is to

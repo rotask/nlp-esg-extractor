@@ -1,16 +1,16 @@
 company,report_year,kpi,value,unit,reporting_year,source_page,notes
-bp,2024,scope_1_emissions,33700000,tCO2e,2024,12,"33.7 MtCO2e — Sustainability Report 2025; cross-ref pg.4 ESG Datasheet 2025"
-bp,2024,total_energy_consumption,134448000,MWh,2024,44,"134,448 GWh — Sustainability Report 2025; cross-ref pg.5 ESG Datasheet 2025"
-bp,2024,water_consumption,47300000,m3,2024,8,"47.3 million m³ — ESG Datasheet 2025"
-shell,2024,scope_1_emissions,69000000,tCO2e,2024,367,"69 million tonnes CO2e; includes consolidated (ESRS-aligned) + operated non-consolidated entities"
-shell,2024,total_energy_consumption,269000000,MWh,2024,366,"269 million MWh"
-shell,2024,water_consumption,86000000,m3,2024,383,"86 million m³"
-enel,2024,scope_1_emissions,18950000,tCO2e,2024,147,"18.95 MtCO2e — pg. 147-148"
-enel,2024,total_energy_consumption,168590000,MWh,2024,150,"168.59 TWh"
-enel,2024,water_consumption,32141000,m3,2024,286,"32,141 thousand m³ — pg. 286-287"
-iberdrola,2024,scope_1_emissions,5246890,tCO2e,2024,38,"5,246,890 tCO2e — continuing activities only (excludes discontinued)"
-iberdrola,2024,total_energy_consumption,101572520,MWh,2024,35,"101,572,520 MWh — pg. 35-36; continuing activities only"
-iberdrola,2024,water_consumption,45642187,m3,2024,48,"45,642,187 m³ — continuing activities only"
-eni,2024,scope_1_emissions,28400000,tCO2e,2024,164,"28.4 MtCO2e — pg. 164-165; consolidated + operated non-consolidated entities"
-eni,2024,total_energy_consumption,84399860,MWh,2024,168,"84,399,860 MWh"
-eni,2024,water_consumption,42000000,m3,2024,182,"42 Mm³"
+bp,2025,scope_1_emissions,33700000,tCO2e,2025,12,33.7 MtCO2e — Sustainability Report 2025; cross-ref pg.4 ESG Datasheet 2025
+bp,2025,total_energy_consumption,134448000,MWh,2025,44,"134,448 GWh — Sustainability Report 2025; cross-ref pg.5 ESG Datasheet 2025"
+bp,2025,water_consumption,47300000,m3,2025,8,47.3 million m³ — ESG Datasheet 2025
+shell,2025,scope_1_emissions,69000000,tCO2e,2025,367,69 million tonnes CO2e; includes consolidated (ESRS-aligned) + operated non-consolidated entities
+shell,2025,total_energy_consumption,269000000,MWh,2025,366,269 million MWh
+shell,2025,water_consumption,86000000,m3,2025,383,86 million m³
+enel,2025,scope_1_emissions,18950000,tCO2e,2025,147,18.95 MtCO2e — pg. 147-148
+enel,2025,total_energy_consumption,168590000,MWh,2025,150,168.59 TWh
+enel,2025,water_consumption,32141000,m3,2025,286,"32,141 thousand m³ — pg. 286-287"
+iberdrola,2025,scope_1_emissions,5246890,tCO2e,2025,38,"5,246,890 tCO2e — continuing activities only (excludes discontinued)"
+iberdrola,2025,total_energy_consumption,101572520,MWh,2025,35,"101,572,520 MWh — pg. 35-36; continuing activities only"
+iberdrola,2025,water_consumption,45642187,m3,2025,48,"45,642,187 m³ — continuing activities only"
+eni,2025,scope_1_emissions,28400000,tCO2e,2025,164,28.4 MtCO2e — pg. 164-165; consolidated + operated non-consolidated entities
+eni,2025,total_energy_consumption,84399860,MWh,2025,168,"84,399,860 MWh"
+eni,2025,water_consumption,42000000,m3,2025,182,42 Mm³

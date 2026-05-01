@@ -16,7 +16,7 @@ greenhouse gases the company emits, in tonnes of CO₂-equivalent),
 Today an analyst has to read each report by hand to pull these out. The
 documents have no shared schema — values can sit in a table, in a paragraph,
 or even inside an infographic. We built a system that automates this
-extraction for five companies (BP, Shell, Enel, Eni, Iberdrola; FY2024) and
+extraction for five companies (BP, Shell, Enel, Eni, Iberdrola; FY2025) and
 measures how accurate it is against numbers we labelled by hand.
 
 ---

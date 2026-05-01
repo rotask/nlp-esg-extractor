@@ -15,7 +15,7 @@ For the full iteration history, see `FINDINGS.md`.
 
 **Input.** N corporate ESG/sustainability PDFs in `data/reports/`
 named `{company}_{year}.pdf`. Five reports in the gold set
-(BP, Shell, Enel, Eni, Iberdrola; FY2024).
+(BP, Shell, Enel, Eni, Iberdrola; FY2025).
 
 **Output.** For every `(report, KPI)` pair, two `KPIExtraction` rows
 (one per extractor) written to `data/runs/<run_tag>/extractions.csv`,
@@ -41,7 +41,7 @@ true positive iff, after canonicalisation:
 
 ```
                   ┌─────────────────────────────┐
-                  │  data/reports/bp_2024.pdf   │  Path
+                  │  data/reports/bp_2025.pdf   │  Path
                   └──────────────┬──────────────┘
                                  ▼
    ╔═══════════════════════════════════════════════════════════════╗
@@ -56,7 +56,7 @@ true positive iff, after canonicalisation:
                                  │
                                  ▼  ParsedReport (TypedDict)
                 ┌────────────────────────────────────┐
-                │ {company: 'bp', report_year: 2024, │
+                │ {company: 'bp', report_year: 2025, │
                 │  parser: 'pdfplumber',             │
                 │  pages: [{page_num, text}, ...],   │
                 │  tables: [{page_num, headers,      │
@@ -149,7 +149,7 @@ true positive iff, after canonicalisation:
 ## 3. Stage-by-stage with examples
 
 Every example is a real artefact from the v9 run on BP's
-`bp_2024.pdf` unless otherwise noted. They reproduce by setting
+`bp_2025.pdf` unless otherwise noted. They reproduce by setting
 `NLP_ESG_DISABLE_DOCLING=1` and running
 `python -m nlp_esg.pipeline --run-tag <tag>`.
 
@@ -367,9 +367,9 @@ full embedding bill again.
 
 **Cache invalidation.** The path is keyed on `parser` and `model`:
 ```
-data/cache/bp_2024_pdfplumber_indexed_climatebert.pkl
-data/cache/bp_2024_pdfplumber_indexed_minilm.pkl
-data/cache/bp_2024_docling_indexed_climatebert.pkl
+data/cache/bp_2025_pdfplumber_indexed_climatebert.pkl
+data/cache/bp_2025_pdfplumber_indexed_minilm.pkl
+data/cache/bp_2025_docling_indexed_climatebert.pkl
 ```
 Changing the parser or the model creates a fresh cache; changing
 `build_index` logic does NOT invalidate. The convention is to bump the
@@ -504,8 +504,9 @@ actual data years and milestone target years in the same row:
 
 Without a cap, `_find_year_col` returned the index of `"2050"` — every
 data cell in that column is `"N/AV."`, so every candidate row was
-skipped. The cap (`year ≤ report_year + 1`) admits 2025 for `report_year=2024`
-files that actually cover FY2025 while excluding milestone columns.
+skipped. The cap (`year ≤ report_year`) admits 2025 for `report_year=2025`
+files (the corpus convention is filename year = most-recent data column)
+while excluding milestone columns 2026/2040/2050.
 
 **Page-heading negative phrases (`page_negative_phrases`).** Defined
 per-KPI in `config.KPIS`. For `water_consumption`:
@@ -736,7 +737,7 @@ silently serve stale v1 responses (the load-bearing iteration-2 bug).
 ```json
 {
   "company": "eni",
-  "report_year": 2024,
+  "report_year": 2025,
   "kpi": "total_energy_consumption",
   "provider": "gemini",
   "model": "gemini-2.5-flash",
@@ -747,7 +748,7 @@ silently serve stale v1 responses (the load-bearing iteration-2 bug).
   "tool_response": {
     "value": 84399860,
     "unit": "MWh",
-    "reporting_year": 2024,
+    "reporting_year": 2025,
     "source_snippet": "Energy consumption (MWh) 84,399,860",
     "confidence": 0.95
   }

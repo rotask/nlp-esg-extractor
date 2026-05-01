@@ -52,7 +52,7 @@ The non-integration suite must stay under ~30 s on CPU; do not introduce tests t
 - **Gold page numbers ≠ PDF page indices.** `data/labels/gold_labels.csv` `source_page` uses the report's printed page numbers (which start after front matter). For Iberdrola the offset is ~10 pages. The runtime pipeline doesn't use the hint — retrieval finds the page — so this only matters when investigating gold by hand.
 - **Docling on this machine SIGSEGVs.** Skip via `NLP_ESG_DISABLE_DOCLING=1`. The 15 MB file-size guard in `ingest_docling.py` and the post-parse "majority-empty pages" check exist for environments where Docling sometimes works.
 - **The LLM cache key change requires re-running** — old cached responses under the v1 key are still on disk at `data/cache/llm/*.json` but won't be served because the new key includes the system prompt. Don't manually port them; it defeats the validation.
-- **`build_index` table-header embedding includes the first 5 row labels** alongside headers, because Eni-style tables put the KPI label in `row[0]` and have year-only headers (`["", "2024", "2023"]`).
+- **`build_index` table-header embedding includes the first 5 row labels** alongside headers, because Eni-style tables put the KPI label in `row[0]` and have year-only headers (`["", "2025", "2024"]`).
 
 ## Where the design and history live
 

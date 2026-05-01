@@ -107,7 +107,7 @@ def test_baseline_extracts_with_co2_subscript_spaces(fake_embed):
     The unit-inference path must apply normalize_co2() before canonicalize_unit
     so the existing ' Unit'-column detection works on Docling output."""
     docling_table = {
-        "company": "demo", "report_year": 2024,
+        "company": "demo", "report_year": 2025,
         "pages": [{"page_num": 1, "text": "Scope 1 emissions report"}],
         "tables": [{
             "page_num": 6,
@@ -132,7 +132,7 @@ def test_baseline_handles_unit_with_internal_space(fake_embed):
     canonicalize_unit). Stripping internal whitespace + normalize_co2 should
     yield 'MtCO2eq' -> 'MtCO2e'."""
     table = {
-        "company": "enel", "report_year": 2024,
+        "company": "enel", "report_year": 2025,
         "pages": [{"page_num": 147, "text": "Scope 1 direct greenhouse gas emissions"}],
         "tables": [{
             "page_num": 147,
@@ -155,7 +155,7 @@ def test_baseline_handles_unit_with_parens_and_space(fake_embed):
     """Eni water pattern: unit cell '(Mm 3 )' wraps the unit in parens with
     internal whitespace. Should canonicalise to Mm3."""
     table = {
-        "company": "eni", "report_year": 2024,
+        "company": "eni", "report_year": 2025,
         "pages": [{"page_num": 184, "text": "Water consumption"}],
         "tables": [{
             "page_num": 184,
@@ -175,7 +175,7 @@ def test_baseline_handles_glued_magnitude_unit(fake_embed):
     """Shell energy pattern: row[1]='millionMWh' (magnitude prefix glued to
     unit, no space). Should decompose -> 269 * 1e6 MWh."""
     table = {
-        "company": "shell", "report_year": 2024,
+        "company": "shell", "report_year": 2025,
         "pages": [{"page_num": 368, "text": "Total energy consumption"}],
         "tables": [{
             "page_num": 368,
@@ -196,7 +196,7 @@ def test_baseline_handles_compound_year_header_with_unit(fake_embed):
     the unit is baked into the year column header. Year col is detected via
     the .YYYY suffix; the unit comes from the same header text."""
     table = {
-        "company": "shell", "report_year": 2024,
+        "company": "shell", "report_year": 2025,
         "pages": [{"page_num": 385, "text": "Water consumption"}],
         "tables": [{
             "page_num": 385,
@@ -218,7 +218,7 @@ def test_baseline_uses_row1_label_when_row0_is_column_artifact(fake_embed):
     artifact) and the actual row label sits in row[1]. Row scoring must
     fall back to row[1]."""
     table = {
-        "company": "iberdrola", "report_year": 2024,
+        "company": "iberdrola", "report_year": 2025,
         "pages": [{"page_num": 58, "text": "Water consumption metrics"}],
         "tables": [{
             "page_num": 58,
@@ -245,7 +245,7 @@ def test_baseline_falls_through_to_next_row_when_best_row_fails(fake_embed):
     path should fall through to the second-best row in the SAME table
     rather than discarding the table entirely."""
     table = {
-        "company": "eni", "report_year": 2024,
+        "company": "eni", "report_year": 2025,
         "pages": [{"page_num": 166, "text": "Scope 1 GHG emissions"}],
         "tables": [{
             "page_num": 166,
@@ -272,7 +272,7 @@ def test_baseline_rejects_table_when_page_has_negative_context(fake_embed):
     heading, not in a table row, so row-level negative_tokens can't see
     it. A page-level negative-phrase config should reject the table."""
     table = {
-        "company": "shell", "report_year": 2024,
+        "company": "shell", "report_year": 2025,
         "pages": [
             # Page 385 — operational control (gold)
             {"page_num": 385, "text": (
@@ -319,7 +319,7 @@ def test_baseline_section_aware_filtering_prefers_operational(fake_embed):
     are rejected via negative_tokens, leaving the operational figure as the
     sole candidate."""
     table = {
-        "company": "bp", "report_year": 2024,
+        "company": "bp", "report_year": 2025,
         "pages": [{"page_num": 5, "text": "Scope 1 emissions report"}],
         "tables": [{
             "page_num": 5,
@@ -347,7 +347,7 @@ def test_baseline_extracts_with_unit_in_row1_no_unit_header(fake_embed):
     """Docling pattern: unit in row[1] but the matching header cell is empty.
     Common for Enel-style tables. Unit inference must fall back to row[1]."""
     docling_table = {
-        "company": "enel", "report_year": 2024,
+        "company": "enel", "report_year": 2025,
         "pages": [{"page_num": 1, "text": "Total energy consumption table"}],
         "tables": [{
             "page_num": 150,
@@ -372,7 +372,9 @@ def test_find_year_col_skips_future_target_years():
 
     headers = ["Tons", "2024", "2025", "%\n25/24", "2026", "2040", "2050",
                "Annual %\ntarget /\nBase year"]
-    assert _find_year_col(headers, report_year=2024) == 2  # the "2025" column
+    # report_year=2025 (filename matches most recent data column);
+    # cap excludes 2026/2040/2050 milestone columns.
+    assert _find_year_col(headers, report_year=2025) == 2  # the "2025" column
 
 
 def test_baseline_rejects_truly_out_of_range(fake_embed):
