@@ -137,8 +137,19 @@ Variables consumed by the code:
 
 ### 5. Drop the report PDFs in place
 
-PDFs are git-ignored. Put the five FY2024 sustainability reports under
-`data/reports/`, named `{company}_{year}.pdf`:
+PDFs are git-ignored. Download each of the five public reports from
+the links below and save them under `data/reports/` with the exact
+filename in the second column:
+
+| Company   | Save as                      | Source PDF (publicly accessible)                                                                                                                                                                                                                            |
+|-----------|------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| bp        | `bp_2024.pdf`                | [BP ESG Datasheet 2025](https://www.bp.com/content/dam/bp/business-sites/en/global/corporate/pdfs/sustainability/group-reports/bp-esg-datasheet-2025.pdf) (paired with the BP Sustainability Report 2025 — the datasheet carries the structured KPI tables) |
+| shell     | `shell_2024.pdf`             | [Shell Annual Report and Accounts 2025](https://www.shell.com/investors/results-and-reporting/annual-report/_jcr_content/root/main/section/promo/links/item0.stream/1774544186011/5727c329a58b5eb7a54442c0a03f562a5aef1159/shell-annual-report-2025-interactive.pdf) |
+| enel      | `enel_2024.pdf`              | [Enel Integrated Annual Report 2025](https://www.enel.com/content/dam/enel-com/documenti/investitori/informazioni-finanziarie/2025/annuali/en/integrated-annual-report_2025.pdf)                                                                            |
+| iberdrola | `iberdrola_2024.pdf`         | [Iberdrola Consolidated Statement of Non-Financial Information (SNFI) and Sustainability Report 2024](https://www.iberdrola.com/documents/20125/5613162/gsm26-sustainability-report-2025.pdf)                                                              |
+| eni       | `eni_2024.pdf`               | [Eni Annual Report 2025](https://www.eni.com/content/dam/enicom/documents/eng/reports/2025/ar-2025/Annual-Report-2025.pdf)                                                                                                                                  |
+
+Resulting layout:
 
 ```
 data/reports/
@@ -149,10 +160,16 @@ data/reports/
 └── shell_2024.pdf
 ```
 
-Five-character keys are `bp`, `enel`, `eni`, `iberdrola`, `shell`. The
-filename is parsed by the dispatcher; a different name will not be
-recognised. The five files used in the published runs are the public
-sustainability reports the listed companies filed for FY2024.
+The filename keys (`bp`, `enel`, `eni`, `iberdrola`, `shell`) are
+parsed by the dispatcher; a different name will not be recognised.
+
+**Filename year vs publication year.** The reports above are titled
+"2025" but cover **FY2024 calendar-year data** alongside the FY2025
+column. The filename is the *data year* (`_2024.pdf`); gold values
+are recorded under `report_year=2024` even though the cell is sometimes
+read from a column the report labels "2025". The pipeline's
+`_find_year_col` cap at `report_year + 1` admits the "2025" column for
+this exact reason.
 
 ### 6. Verify the setup
 
