@@ -661,8 +661,8 @@ Three takeaways are worth highlighting in the final report:
   propagation, magnitude tiebreak, and column-header artefact fallback;
   baseline 12 / 15.
 - `data/runs/v_docling_baseline_only/` — **canonical Docling baseline
-  run**; baseline 14 / 15. Produced by `baseline_only.py` (bypasses the
-  LLM stage, useful when Gemini quota is exhausted).
+  run**; baseline 14 / 15. Produced by `scripts/run_baseline_only.py`
+  (bypasses the LLM stage, useful when Gemini quota is exhausted).
 
 **Gold + per-call audit**:
 - `data/labels/gold_labels.csv` — 15 hand-labelled values with source

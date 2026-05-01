@@ -1155,7 +1155,7 @@ whose failure surfaces are structurally disjoint:
 
 ```bash
 LLM_PROVIDER=gemini GEMINI_MODEL=gemini-2.5-flash \
-    python run_docling_full.py --run-tag my_run
+    python scripts/run_docling_full.py --run-tag my_run
 ```
 
 First run on the corpus: ~53 min on RTX 4050 GPU (Docling parse) +
@@ -1166,11 +1166,11 @@ and indexed-report on disk; LLM responses cached on prompt hash).
 **Baseline-only (LLM quota exhausted, fast iteration):**
 
 ```bash
-python baseline_only.py
+python scripts/run_baseline_only.py
 ```
 
 Bypasses the LLM stage; runs in seconds against the cached
-`IndexedReport`s. Persists to `data/runs/v_docling_baseline_only/`.
+`IndexedReport`s. Persists to `data/runs/v_baseline_only/`.
 
 **pdfplumber-only (no GPU, fast wall-clock):**
 
