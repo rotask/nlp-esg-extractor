@@ -238,6 +238,79 @@ def test_baseline_uses_row1_label_when_row0_is_column_artifact(fake_embed):
     assert result.unit == "m3"
 
 
+def test_baseline_falls_through_to_next_row_when_best_row_fails(fake_embed):
+    """Eni scope_1 pattern: the best-by-row-score row in a table fails the
+    unit / plausible-range check ('Percentage of Scope 1 ...' value '61'
+    yields unit '%' which isn't in scope_1's unit family). The table-first
+    path should fall through to the second-best row in the SAME table
+    rather than discarding the table entirely."""
+    table = {
+        "company": "eni", "report_year": 2024,
+        "pages": [{"page_num": 166, "text": "Scope 1 GHG emissions"}],
+        "tables": [{
+            "page_num": 166,
+            "headers": ["GHG EMISSIONS SCOPE 1 AND 2", "Unit", "2025", "2024"],
+            "rows": [
+                # Best by row_score (more shared tokens) but fails unit check
+                ["Percentage of Scope 1 direct greenhouse gas emissions",
+                 "%", "61", "63"],
+                # Second-best (gold) — 2025 value 28.4, 2024 value 26.2
+                ["Direct Scope 1 greenhouse gas emissions",
+                 "MtCO 2 e", "28.4", "26.2"],
+            ],
+        }],
+    }
+    indexed = build_index(table)
+    result = BaselineExtractor().extract(indexed, "scope_1_emissions")
+    assert result.value == pytest.approx(28_400_000.0)
+
+
+def test_baseline_rejects_table_when_page_has_negative_context(fake_embed):
+    """Shell water pattern: page 424 has 'Water consumption [B] | 127 | 117'
+    inside a section whose heading reads 'Water consumption (financial
+    control boundary)'. The heading sits in page text as a Markdown
+    heading, not in a table row, so row-level negative_tokens can't see
+    it. A page-level negative-phrase config should reject the table."""
+    table = {
+        "company": "shell", "report_year": 2024,
+        "pages": [
+            # Page 385 — operational control (gold)
+            {"page_num": 385, "text": (
+                "## Water consumption (E3-4)\n"
+                "We present data for water consumption against an operational\n"
+                "control boundary.\n"
+            )},
+            # Page 424 — financial control boundary
+            {"page_num": 424, "text": (
+                "## Water consumption (financial control boundary) [A]\n"
+                "The financial control boundary includes 100% of the parent\n"
+                "company and subsidiaries.\n"
+            )},
+        ],
+        "tables": [
+            {
+                "page_num": 385,
+                "headers": ["", "million cubic metres.2025", "million cubic metres.2024"],
+                "rows": [
+                    ["Total water consumption", "86", "90"],
+                ],
+            },
+            {
+                "page_num": 424,
+                "headers": ["", "million cubic metres.2025", "million cubic metres.2024"],
+                "rows": [
+                    ["Total water consumption", "127", "117"],
+                ],
+            },
+        ],
+    }
+    indexed = build_index(table)
+    result = BaselineExtractor().extract(indexed, "water_consumption")
+    # Page 424 carries 'financial control' in its text — must be rejected,
+    # leaving page 385 (operational control) as the sole candidate.
+    assert result.value == pytest.approx(86_000_000.0)
+
+
 def test_baseline_section_aware_filtering_prefers_operational(fake_embed):
     """BP scope_1 pattern: a single table with two sub-sections — operational
     control (33.7M) and equity share (32.4M). Section-header rows

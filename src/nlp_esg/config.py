@@ -72,6 +72,15 @@ KPIS: dict[str, dict] = {
         "canonical_unit": "m3",
         "plausible_range": (1e1, 1e10),
         "negative_tokens": ["withdrawal", "withdrawn", "abstracted", "discharge", "discharged", "intake", "recycled", "reclaimed", " net ", "discontinued"],
+        # Page-level (rather than row-level) text matched against page_text
+        # before considering any table on that page. Shell publishes water
+        # consumption against TWO boundaries — operational control (the
+        # primary disclosure, ESRS-aligned for water) and financial control
+        # (supplementary). The financial-control table sits under a Markdown
+        # heading "Water consumption (financial control boundary)" in page
+        # text, which row-level negative_tokens can't see. Reject any water
+        # table on a page whose text mentions 'financial control boundary'.
+        "page_negative_phrases": ["financial control"],
     },
 }
 

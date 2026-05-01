@@ -223,41 +223,52 @@ class BaselineExtractor(Extractor):
         # the operational-control / consolidated total in ESG datasheets.
         all_table_candidates: list[tuple[float, KPIExtraction]] = []
 
+        # Build a page_num -> Markdown-heading-only string map for page-level
+        # context checks. We restrict to lines starting with '#' so body-text
+        # cross-references ('See page 422 for ... financial control
+        # boundary') don't disqualify a page whose actual section heading is
+        # innocent. Docling outputs page text with Markdown headings.
+        page_heading_text: dict[int, str] = {}
+        for p in report["pages"]:
+            txt = p.get("text") or ""
+            heads = [ln for ln in txt.split("\n") if ln.lstrip().startswith("#")]
+            page_heading_text[p["page_num"]] = " ".join(heads).lower()
+        page_negative_phrases = [p.lower() for p in kpi.get("page_negative_phrases", [])]
+
         for table_sim, table, _, _ in table_candidates:
+            # Page-level rejection (Shell water 'financial control boundary'
+            # heading lives in page text, not in any table row).
+            heading_text_lc = page_heading_text.get(table["page_num"], "")
+            if any(phrase in heading_text_lc for phrase in page_negative_phrases):
+                continue
+
             headers, rows = _effective_headers_and_rows(table)
             year_col = _find_year_col(headers, report["report_year"])
             if year_col is None:
                 continue
 
-            best_row_idx = None
-            best_row_score = 0.0
             negative_tokens = [t.lower() for t in kpi.get("negative_tokens", [])]
             current_section = ""  # propagated from preceding section-header rows
+            scored_rows: list[tuple[float, int, str]] = []
             for ri, row in enumerate(rows):
                 if not row:
                     continue
-                # Section-header rows have no number in the year column. Track
-                # their row[0] as the current section so subsequent data rows
-                # inherit it for negative-token filtering. (BP's 'GHG-Equityshare'
-                # section gets rejected by 'equity' once section context is
-                # available; without this the equity sub-table beats operational
-                # control on phrase-overlap alone.)
                 if year_col >= len(row):
                     continue
+                # Section-header rows have no number in the year column. Track
+                # their row[0] as the current section so subsequent data rows
+                # inherit it for negative-token filtering.
                 if not re.search(_NUMBER_RE, row[year_col] or ""):
                     if (row[0] or "").strip():
                         current_section = row[0]
                     continue
 
                 # Pick the label cell. Falls back to row[1] when row[0] is a
-                # generic column-header artefact ('Metric', 'Description'…).
+                # generic column-header artefact.
                 label_cell = row[0] or ""
                 if label_cell.strip().lower() in _COLUMN_HEADER_ARTIFACTS and len(row) > 1:
                     label_cell = row[1] or ""
 
-                # Negative tokens apply against (section + row label + row[1]
-                # unit cell) so a 'GHG-Equityshare' section flag reaches data
-                # rows below it.
                 neg_haystack = (
                     current_section + " " + label_cell + " " +
                     (row[1] if len(row) > 1 else "")
@@ -265,75 +276,77 @@ class BaselineExtractor(Extractor):
                 if any(neg in neg_haystack for neg in negative_tokens):
                     continue
                 rs = _row_score(kpi["query"], query_tokens, label_cell)
-                if rs > best_row_score:
-                    best_row_score = rs
-                    best_row_idx = ri
+                if rs > 0:
+                    scored_rows.append((rs, ri, label_cell))
 
-            if best_row_idx is None or best_row_score == 0.0:
+            if not scored_rows:
                 continue
+            scored_rows.sort(key=lambda x: x[0], reverse=True)
 
-            row = rows[best_row_idx]
-            if year_col >= len(row):
-                continue
-            cell = row[year_col]
-            num_match = re.search(_NUMBER_RE, cell)
-            if not num_match:
-                continue
-            try:
-                raw_value = parse_number(num_match.group(0))
-            except ValueError:
-                continue
+            # Try each row in row-score order. The first one that passes unit
+            # and plausible-range checks becomes this table's candidate.
+            # Without this fall-through Eni page 166's gold row 'Direct GHG
+            # emissions (Scope 1)' (rs=0.20, value 28.4 MtCO2e) was masked by
+            # 'Percentage of Scope 1 ... emission trading system' (rs=0.30,
+            # value 61 %, fails unit check), and the whole table got skipped.
+            for best_row_score, best_row_idx, display_label in scored_rows:
+                row = rows[best_row_idx]
+                if year_col >= len(row):
+                    continue
+                cell = row[year_col]
+                num_match = re.search(_NUMBER_RE, cell)
+                if not num_match:
+                    continue
+                try:
+                    raw_value = parse_number(num_match.group(0))
+                except ValueError:
+                    continue
 
-            unit_match = _infer_unit_from_row_or_header(
-                headers, row, year_col, unit_family_canonicals
-            )
-            if unit_match is None:
-                continue
-            multiplier, unit = unit_match
-            if unit not in unit_family_canonicals:
-                continue
-
-            try:
-                canonical_value = to_canonical_value(
-                    raw_value * multiplier, unit, kpi["canonical_unit"]
+                unit_match = _infer_unit_from_row_or_header(
+                    headers, row, year_col, unit_family_canonicals
                 )
-            except ValueError:
-                continue
+                if unit_match is None:
+                    continue
+                multiplier, unit = unit_match
+                if unit not in unit_family_canonicals:
+                    continue
 
-            lo, hi = kpi["plausible_range"]
-            if not (lo <= canonical_value <= hi):
-                log.debug(
-                    "baseline: table candidate rejected out_of_range (kpi=%s, value=%s)",
-                    kpi_key, canonical_value,
+                try:
+                    canonical_value = to_canonical_value(
+                        raw_value * multiplier, unit, kpi["canonical_unit"]
+                    )
+                except ValueError:
+                    continue
+
+                lo, hi = kpi["plausible_range"]
+                if not (lo <= canonical_value <= hi):
+                    log.debug(
+                        "baseline: table-row candidate rejected out_of_range (kpi=%s, value=%s)",
+                        kpi_key, canonical_value,
+                    )
+                    continue
+
+                candidate_flags = list(flags)
+                combined_score = table_sim * best_row_score
+                if _YEAR_RE.fullmatch(cell.strip()):
+                    candidate_flags.append("year_shaped_value")
+                    combined_score *= 0.5
+
+                candidate = KPIExtraction(
+                    company=report["company"],
+                    report_year=report["report_year"],
+                    kpi=kpi_key,
+                    value=canonical_value,
+                    unit=kpi["canonical_unit"],
+                    reporting_year=report["report_year"],
+                    source_snippet=f"table@page {table['page_num']}: {display_label} | {cell}",
+                    source_page=table["page_num"],
+                    confidence=combined_score,
+                    extractor=self.name,
+                    flags=candidate_flags,
                 )
-                continue
-
-            candidate_flags = list(flags)
-            combined_score = table_sim * best_row_score
-            if _YEAR_RE.fullmatch(cell.strip()):
-                candidate_flags.append("year_shaped_value")
-                combined_score *= 0.5
-
-            # Use the actual label text in the source snippet (not the raw
-            # row[0] which may be a column-header artefact).
-            display_label = (
-                row[1] if (row and (row[0] or "").strip().lower() in _COLUMN_HEADER_ARTIFACTS and len(row) > 1)
-                else (row[0] if row else "")
-            )
-            candidate = KPIExtraction(
-                company=report["company"],
-                report_year=report["report_year"],
-                kpi=kpi_key,
-                value=canonical_value,
-                unit=kpi["canonical_unit"],
-                reporting_year=report["report_year"],
-                source_snippet=f"table@page {table['page_num']}: {display_label} | {cell}",
-                source_page=table["page_num"],
-                confidence=combined_score,
-                extractor=self.name,
-                flags=candidate_flags,
-            )
-            all_table_candidates.append((combined_score, candidate))
+                all_table_candidates.append((combined_score, candidate))
+                break  # one candidate per table
 
         if all_table_candidates:
             # Magnitude tiebreak: among candidates within 5% of the best
