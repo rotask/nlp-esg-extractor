@@ -21,13 +21,30 @@ data/reports/
 # specific run — git can't re-include files inside an excluded directory.
 data/runs/*
 # …except runs the report cites for reproducibility:
-#   v9_magnitude_tiebreak    — best baseline-only run (12/15 TP, F1=0.88)
-#   v_gemini_post_quota       — LLM run with gemini-2.5-flash-lite (§10/§11)
-#   v_gemini_25flash_post_quota — LLM run with gemini-2.5-flash (§12)
-# All three carry extractions.csv + metrics.csv + (LLM only) per-KPI prompt logs.
+#
+# Pre-Docling pdfplumber-track runs (cited in the headline tables for the
+# "Baseline + pdfplumber" and "LLM (Gemini 2.5-flash) + pdfplumber" rows):
+#   v9_magnitude_tiebreak       — baseline-only (12/15 TP, F1=0.88)
+#   v_gemini_post_quota          — LLM with gemini-2.5-flash-lite (8/15)
+#   v_gemini_25flash_post_quota  — LLM with gemini-2.5-flash (12/15)
+#
+# Docling-track runs cited in the headline tables:
+#   v_docling_baseline_only      — POST-fix Docling baseline (14/15) — canonical
+#   v_docling_full               — Docling full pipeline; carries parse_timings.csv
+#
+# Each carries extractions.csv + metrics.csv + (LLM tracks only) per-KPI
+# prompt logs under llm_prompts/.
 !data/runs/v9_magnitude_tiebreak/
 !data/runs/v_gemini_post_quota/
 !data/runs/v_gemini_25flash_post_quota/
+!data/runs/v_docling_baseline_only/
+!data/runs/v_docling_full/
+
+# Per-run pipeline logs created by tee — useful while iterating but noisy
+# in the repo. The committed runs above carry the relevant artefacts on
+# their own; logs are reproducible from the pipeline command.
+data/runs/_pipeline_*.log
+data/runs/_pdfplumber_*.log
 
 # Claude Code agent settings (machine-local)
 .claude/

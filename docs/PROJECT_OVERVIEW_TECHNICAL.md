@@ -862,10 +862,10 @@ CONTROL"*, *"never sum components"*) that `2.5-flash` honours.
 
 | Run dir | Parser | Extractor | TP | F1 macro |
 |---|---|---|---|---|
-| `v9_magnitude_tiebreak/` | pdfplumber | baseline (pre-fix) | 12/15 | 0.88 |
-| `v_corrected_gold/` | pdfplumber | baseline (post year-col fix) | 12/15 | 0.88 |
-| `v_corrected_gold/` | pdfplumber | LLM (`gemini-2.5-flash`) | 12/15 | 0.88 |
-| `v_corrected_gold/` | pdfplumber | best-of-either | 14/15 | 0.96 |
+| `v9_magnitude_tiebreak/` | pdfplumber | baseline | 12/15 | 0.88 |
+| `v_gemini_25flash_post_quota/` | pdfplumber | LLM (`gemini-2.5-flash`) | 12/15 | 0.88 |
+| `v_gemini_25flash_post_quota/` | pdfplumber | best-of-either | 14/15 | 0.96 |
+| `v_gemini_post_quota/` | pdfplumber | LLM (`gemini-2.5-flash-lite`) | 8/15 | 0.66 |
 | `v_docling_full/` | docling | baseline (Docling, pre-fix) | 6/15 | 0.55 |
 | `v_docling_baseline_fixed/` | docling | baseline (Docling, fixes A+B) | 7/15 | 0.62 |
 | `v_docling_baseline_v2/` | docling | baseline (Docling, +section/tiebreak/row[1]) | 12/15 | 0.88 |
@@ -1182,14 +1182,13 @@ NLP_ESG_DISABLE_DOCLING=1 LLM_PROVIDER=gemini \
 
 Runs available for direct reproducibility:
 
-**pdfplumber-based** (`master`):
-- `data/runs/v9_magnitude_tiebreak/` — pre-fix baseline-only.
-- `data/runs/v_gemini_25flash_post_quota/` — pre-fix
-  `gemini-2.5-flash` LLM run referenced in the original headline.
-- `data/runs/v_gemini_post_quota/` — `gemini-2.5-flash-lite` (kept
-  for §5/error-mode discussion).
-- `data/runs/v_corrected_gold/` — `gemini-2.5-flash`, gold-corrected;
-  pdfplumber baseline 12/15, LLM 12/15, best-of-either 14/15.
+**pdfplumber-based** (`master`, pre-Docling):
+- `data/runs/v9_magnitude_tiebreak/` — baseline-only (12/15).
+- `data/runs/v_gemini_25flash_post_quota/` — `gemini-2.5-flash` LLM run
+  paired with the pdfplumber baseline; canonical pre-Docling headline
+  (baseline 12/15, LLM 12/15, best-of-either 14/15).
+- `data/runs/v_gemini_post_quota/` — `gemini-2.5-flash-lite` LLM run
+  on the same pdfplumber input (LLM 8/15).
 
 **Docling-based** (`experiment/docling-batched`):
 - `data/runs/v_docling_full/` — initial Docling run, includes

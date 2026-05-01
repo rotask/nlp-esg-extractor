@@ -644,11 +644,9 @@ Three takeaways are worth highlighting in the final report:
 - `data/runs/v_gemini_25flash_post_quota/` — pre-fix LLM run on
   `gemini-2.5-flash` referenced in the original 12/15 LLM / 14/15
   best-of-either headline.
-- `data/runs/v_gemini_post_quota/` — `gemini-2.5-flash-lite` run, kept
-  for error-mode discussion.
-- `data/runs/v_corrected_gold/` — `gemini-2.5-flash` after the gold
-  correction (Shell water 26 → 86 M m³); pdfplumber baseline 12 / 15,
-  LLM 12 / 15.
+- `data/runs/v_gemini_post_quota/` — `gemini-2.5-flash-lite` LLM run
+  on the same pdfplumber input (LLM 8/15); kept for error-mode
+  discussion.
 
 **Docling runs** (`experiment/docling-batched` branch):
 - `data/runs/v_docling_full/` — initial Docling run with

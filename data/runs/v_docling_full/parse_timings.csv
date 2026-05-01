@@ -1,0 +1,6 @@
+pdf,parser,n_pages,n_tables,parse_s,parse_cache_hit,index_s,total_s
+bp_2024.pdf,docling,14,18,0.0,True,0.0,0.0
+enel_2024.pdf,docling,700,560,0.0,True,0.0,0.1
+eni_2024.pdf,docling,488,370,0.0,True,0.0,0.0
+iberdrola_2024.pdf,docling,148,94,0.0,True,0.0,0.0
+shell_2024.pdf,docling,462,427,0.0,True,0.0,0.1

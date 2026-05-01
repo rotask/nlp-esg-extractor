@@ -42,10 +42,11 @@ turn retrieved pages into a value:
 
 | Run                                  | Correct (TP) | F1 macro | Run dir                                  |
 |--------------------------------------|--------------|----------|------------------------------------------|
-| Baseline + pdfplumber                | 12 / 15      | 0.88     | `data/runs/v_corrected_gold/`            |
+| Baseline + pdfplumber                | 12 / 15      | 0.88     | `data/runs/v9_magnitude_tiebreak/`       |
 | **Baseline + Docling**               | **14 / 15**  | **0.96** | `data/runs/v_docling_baseline_only/`     |
-| LLM (Gemini 2.5-flash) + pdfplumber  | 12 / 15      | 0.88     | `data/runs/v_corrected_gold/`            |
-| **Best-of-either** (Docling baseline ∪ LLM) | **15 / 15** | **1.00** | union of the above two                |
+| LLM (Gemini 2.5-flash) + pdfplumber  | 12 / 15      | 0.88     | `data/runs/v_gemini_25flash_post_quota/` |
+| LLM (Gemini 2.5-flash-lite) + pdfplumber | 8 / 15   | 0.66     | `data/runs/v_gemini_post_quota/`         |
+| **Best-of-either** (Docling baseline ∪ flash LLM) | **15 / 15** | **1.00** | union of the Docling baseline and the flash LLM run |
 
 Per-KPI on the canonical run:
 
@@ -273,8 +274,10 @@ so prompt edits invalidate stale responses automatically. A reader can
 reproduce any cell's failure mode from the JSON file alone, without
 re-querying the API.
 
-The committed `data/runs/v_corrected_gold/llm_prompts/` directory
-contains all 15 prompt logs from the canonical `gemini-2.5-flash` run.
+The committed `data/runs/v_gemini_25flash_post_quota/llm_prompts/`
+directory contains all 15 prompt logs from the canonical
+`gemini-2.5-flash` run; `data/runs/v_gemini_post_quota/llm_prompts/`
+holds the same 15 cells under `gemini-2.5-flash-lite`.
 
 ### (c) Instructions to reproduce the headline numbers
 
@@ -337,7 +340,9 @@ See **Reproducing the headline numbers** above. To summarise:
 │   │   └── labels_README.md
 │   ├── cache/                      # parsed-report + indexed-report .pkls (git-ignored)
 │   └── runs/                       # output dir; canonical runs committed
-│       ├── v_corrected_gold/                # pdfplumber baseline + flash LLM
+│       ├── v9_magnitude_tiebreak/           # pre-Docling baseline-only (12/15)
+│       ├── v_gemini_25flash_post_quota/     # pre-Docling LLM with gemini-2.5-flash (12/15)
+│       ├── v_gemini_post_quota/             # pre-Docling LLM with gemini-2.5-flash-lite (8/15)
 │       ├── v_docling_baseline_only/         # Docling baseline 14/15 (canonical)
 │       ├── v_docling_full/                  # Docling full pipeline + parse_timings.csv
 │       └── <tag>/llm_prompts/*.json         # ← deliverable (b)
