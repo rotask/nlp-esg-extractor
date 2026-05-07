@@ -27,8 +27,6 @@ turn retrieved pages into a value:
 
 ## Pipeline
 
-![Pipeline diagram](notebooks/figures/image.png)
-
 1. **Ingest** — Docling-first (CUDA-accelerated, page-range batched), pdfplumber fallback.
 2. **Index** — ClimateBERT mean-pool embeddings (768-dim) per sentence + per table-header string.
 3. **Retrieve** — hybrid BM25 + RRF over 3 KPI query phrasings; top-25 pages to baseline, top-16 to LLM.
@@ -366,20 +364,12 @@ See **Reproducing the headline numbers** above. To summarise:
 │       ├── v_docling_full/                  # Docling full pipeline + parse_timings.csv
 │       └── <tag>/llm_prompts/*.json         # ← deliverable (b)
 │
-├── docs/
-│   ├── PROJECT_OVERVIEW.md         # plain-English walkthrough of the system
-│   ├── PROJECT_OVERVIEW_TECHNICAL.md # code-level companion (data shapes + examples)
-│   ├── FINDINGS.md                 # full iteration history (v1 → final)
-│   ├── API.md                      # module-level Python API reference
-│   └── SUSTAINABILITY.md           # impact, SDG alignment, scalability, ethics
-│
-└── notebooks/
-    ├── demo.ipynb                  # interactive walkthrough of the pipeline
-    ├── headline_figures.ipynb      # 14 figures used in report + presentation
-    ├── make_figures.py             # script that regenerates the figures
-    └── figures/
-        ├── image.png               # high-level pipeline diagram (used in README)
-        └── 01_…14_…png             # paper figures
+└── docs/
+    ├── PROJECT_OVERVIEW.md         # plain-English walkthrough of the system
+    ├── PROJECT_OVERVIEW_TECHNICAL.md # code-level companion (data shapes + examples)
+    ├── FINDINGS.md                 # full iteration history (v1 → final)
+    ├── API.md                      # module-level Python API reference
+    └── SUSTAINABILITY.md           # impact, SDG alignment, scalability, ethics
 ```
 
 ---

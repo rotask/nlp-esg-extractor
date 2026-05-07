@@ -56,6 +56,4 @@ The non-integration suite must stay under ~30 s on CPU; do not introduce tests t
 
 ## Where the design and history live
 
-- `docs/superpowers/specs/2026-04-26-nlp-esg-iteration2-design.md` — current iteration design.
-- `docs/superpowers/plans/2026-04-26-nlp-esg-iteration2.md` — task-by-task implementation plan.
 - `docs/FINDINGS.md` — what failed, what worked, and why, across all iterations. Read this before starting structural work; many "obvious" improvements have already been tried and recorded as not viable.

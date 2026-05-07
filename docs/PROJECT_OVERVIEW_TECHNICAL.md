@@ -1272,5 +1272,3 @@ without re-querying the API.
 - `CLAUDE.md` — architecture cheatsheet + cache-key invariants +
   gotchas (CO₂ word-boundary bug, Docling SIGSEGV, gold page-number
   offset, etc.).
-- `notebooks/headline_figures.ipynb` — 14 figures used in the report
-  and presentation, regenerated from the committed run artefacts.

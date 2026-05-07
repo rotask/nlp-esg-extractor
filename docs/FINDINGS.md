@@ -392,9 +392,6 @@ needed.
 
 ## 5. Iteration 2 (2026-04-26)
 
-Implementation plan: `docs/superpowers/plans/2026-04-26-nlp-esg-iteration2.md`.
-Design: `docs/superpowers/specs/2026-04-26-nlp-esg-iteration2-design.md`.
-
 ### 5.1 What changed
 
 Eight code commits (Tasks 1–14) implemented the design:
