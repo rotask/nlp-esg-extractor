@@ -27,6 +27,8 @@ turn retrieved pages into a value:
 
 ## Pipeline
 
+![Pipeline diagram](docs/figures/pipeline.png)
+
 1. **Ingest** — Docling-first (CUDA-accelerated, page-range batched), pdfplumber fallback.
 2. **Index** — ClimateBERT mean-pool embeddings (768-dim) per sentence + per table-header string.
 3. **Retrieve** — hybrid BM25 + RRF over 3 KPI query phrasings; top-25 pages to baseline, top-16 to LLM.
