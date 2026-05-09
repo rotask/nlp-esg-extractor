@@ -448,7 +448,7 @@ each pattern that broke during development (`test_baseline.py`).
 
 ---
 
-## Acknowledgement
+## License & Acknowledgement
 
-Coursework deliverable, Team B. No LICENSE file — treat as
-all-rights-reserved unless told otherwise by the course staff.
+Released under the [MIT License](LICENSE). Originally produced as a
+coursework deliverable, Team B.
